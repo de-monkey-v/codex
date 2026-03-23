@@ -5,8 +5,9 @@ use std::sync::Arc;
 use codex_core::AuthManager;
 use codex_core::auth::AuthCredentialsStoreMode;
 use codex_core::auth::login_with_api_key;
+use codex_core::auth::read_openai_api_key_from_env;
 use codex_login::ApiProvisionOptions;
-use codex_login::CODEX_API_KEY_ENV_VAR;
+use codex_login::OPENAI_API_KEY_ENV_VAR;
 use codex_login::PendingApiProvisioning;
 use codex_login::ProvisionedApiKey;
 use codex_login::start_api_provisioning;
@@ -31,14 +32,18 @@ pub(crate) fn start_command(
     cwd: PathBuf,
     forced_login_method: Option<ForcedLoginMethod>,
 ) -> Result<ApiProvisionStartMessage, String> {
+    if read_openai_api_key_from_env().is_some() {
+        return Ok(existing_shell_api_key_message());
+    }
+
     let dotenv_path = cwd.join(".env");
     let start_hint = format!(
-        "Codex will save {CODEX_API_KEY_ENV_VAR} to {path} and hot-apply it here when allowed.",
+        "Codex will save {OPENAI_API_KEY_ENV_VAR} to {path} and hot-apply it here when allowed.",
         path = dotenv_path.display()
     );
     validate_dotenv_target(&dotenv_path).map_err(|err| {
         format!(
-            "Unable to prepare {} for {CODEX_API_KEY_ENV_VAR}: {err}",
+            "Unable to prepare {} for {OPENAI_API_KEY_ENV_VAR}: {err}",
             dotenv_path.display(),
         )
     })?;
@@ -70,6 +75,17 @@ pub(crate) fn start_command(
         message: "Opening your browser to provision a project API key.".to_string(),
         hint: Some(start_hint),
     })
+}
+
+fn existing_shell_api_key_message() -> ApiProvisionStartMessage {
+    ApiProvisionStartMessage {
+        message: format!(
+            "{OPENAI_API_KEY_ENV_VAR} is already set in this Codex session; skipping API provisioning."
+        ),
+        hint: Some(format!(
+            "This Codex session already inherited {OPENAI_API_KEY_ENV_VAR} from its shell environment. Unset it and run /api-provision again if you want Codex to provision and save a different key."
+        )),
+    }
 }
 
 async fn complete_command(
@@ -112,10 +128,9 @@ fn live_apply_api_key(
     auth_manager: Arc<AuthManager>,
 ) -> LiveApplyOutcome {
     if matches!(forced_login_method, Some(ForcedLoginMethod::Chatgpt)) {
-        return LiveApplyOutcome::Skipped(
-            "Saved the key to .env, but left this session unchanged because ChatGPT login is required here."
-                .to_string(),
-        );
+        return LiveApplyOutcome::Skipped(format!(
+            "Saved {OPENAI_API_KEY_ENV_VAR} to .env, but left this session unchanged because ChatGPT login is required here."
+        ));
     }
 
     match login_with_api_key(codex_home, api_key, AuthCredentialsStoreMode::Ephemeral) {
@@ -147,14 +162,14 @@ fn success_cell(
         ),
         LiveApplyOutcome::Skipped(reason) => Some(reason),
         LiveApplyOutcome::Failed(err) => Some(format!(
-            "Saved the key to {}, but could not hot-apply it in this session: {err}",
-            dotenv_path.display()
+            "Saved {OPENAI_API_KEY_ENV_VAR} to {}, but could not hot-apply it in this session: {err}",
+            dotenv_path.display(),
         )),
     };
 
     history_cell::new_info_event(
         format!(
-            "Provisioned an API key for {organization} / {project} and saved {CODEX_API_KEY_ENV_VAR} to {}.",
+            "Provisioned an API key for {organization} / {project} and saved {OPENAI_API_KEY_ENV_VAR} to {}.",
             dotenv_path.display()
         ),
         hint,
@@ -206,12 +221,28 @@ mod tests {
             },
             Path::new("/tmp/workspace/.env"),
             LiveApplyOutcome::Skipped(
-                "Saved the key to .env, but left this session unchanged because ChatGPT login is required here."
+                "Saved OPENAI_API_KEY to .env, but left this session unchanged because ChatGPT login is required here."
                     .to_string(),
             ),
         );
 
         assert_snapshot!(render_cell(&cell));
+    }
+
+    #[test]
+    fn existing_shell_api_key_message_mentions_openai_api_key() {
+        let message = existing_shell_api_key_message();
+
+        assert_eq!(
+            message.message,
+            "OPENAI_API_KEY is already set in this Codex session; skipping API provisioning."
+        );
+        assert_eq!(
+            message.hint,
+            Some(
+                "This Codex session already inherited OPENAI_API_KEY from its shell environment. Unset it and run /api-provision again if you want Codex to provision and save a different key.".to_string()
+            )
+        );
     }
 
     fn render_cell(cell: &PlainHistoryCell) -> String {

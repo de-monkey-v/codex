@@ -3,7 +3,7 @@ use std::io;
 use std::io::ErrorKind;
 use std::path::Path;
 
-use codex_core::auth::CODEX_API_KEY_ENV_VAR;
+use codex_core::auth::OPENAI_API_KEY_ENV_VAR;
 
 pub fn validate_dotenv_target(path: &Path) -> io::Result<()> {
     ensure_parent_dir(path)?;
@@ -21,7 +21,7 @@ pub fn upsert_dotenv_api_key(path: &Path, api_key: &str) -> io::Result<()> {
     if api_key.contains(['\n', '\r']) {
         return Err(io::Error::new(
             ErrorKind::InvalidInput,
-            "CODEX_API_KEY must not contain newlines",
+            "OPENAI_API_KEY must not contain newlines",
         ));
     }
 
@@ -37,9 +37,9 @@ pub fn upsert_dotenv_api_key(path: &Path, api_key: &str) -> io::Result<()> {
     let mut wrote_api_key = false;
 
     for segment in split_lines_preserving_terminators(&existing) {
-        if is_active_assignment_for(segment, CODEX_API_KEY_ENV_VAR) {
+        if is_active_assignment_for(segment, OPENAI_API_KEY_ENV_VAR) {
             if !wrote_api_key {
-                next.push_str(&format!("{CODEX_API_KEY_ENV_VAR}={api_key}\n"));
+                next.push_str(&format!("{OPENAI_API_KEY_ENV_VAR}={api_key}\n"));
                 wrote_api_key = true;
             }
             continue;
@@ -52,7 +52,7 @@ pub fn upsert_dotenv_api_key(path: &Path, api_key: &str) -> io::Result<()> {
         if !next.is_empty() && !next.ends_with('\n') {
             next.push('\n');
         }
-        next.push_str(&format!("{CODEX_API_KEY_ENV_VAR}={api_key}\n"));
+        next.push_str(&format!("{OPENAI_API_KEY_ENV_VAR}={api_key}\n"));
     }
 
     std::fs::write(path, next)
@@ -104,7 +104,7 @@ mod tests {
         upsert_dotenv_api_key(&dotenv_path, "sk-test-key").expect("write dotenv");
 
         let written = std::fs::read_to_string(&dotenv_path).expect("read dotenv");
-        assert_eq!(written, "CODEX_API_KEY=sk-test-key\n");
+        assert_eq!(written, "OPENAI_API_KEY=sk-test-key\n");
     }
 
     #[test]
@@ -113,7 +113,7 @@ mod tests {
         let dotenv_path = temp_dir.path().join(".env");
         std::fs::write(
             &dotenv_path,
-            "# comment\nCODEX_API_KEY=sk-old-1\nOTHER=value\nexport CODEX_API_KEY = sk-old-2\n",
+            "# comment\nOPENAI_API_KEY=sk-old-1\nOTHER=value\nexport OPENAI_API_KEY = sk-old-2\n",
         )
         .expect("seed dotenv");
 
@@ -122,7 +122,7 @@ mod tests {
         let written = std::fs::read_to_string(&dotenv_path).expect("read dotenv");
         assert_eq!(
             written,
-            "# comment\nCODEX_API_KEY=sk-new-key\nOTHER=value\n"
+            "# comment\nOPENAI_API_KEY=sk-new-key\nOTHER=value\n"
         );
     }
 
