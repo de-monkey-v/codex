@@ -4716,6 +4716,23 @@ impl ChatWidget {
                     tx.send(AppEvent::DiffResult(text));
                 });
             }
+            SlashCommand::ApiProvision => {
+                let cwd = self.status_line_cwd().to_path_buf();
+                match crate::api_provision::start_command(
+                    self.app_event_tx.clone(),
+                    self.auth_manager.clone(),
+                    self.config.codex_home.clone(),
+                    cwd,
+                    self.config.forced_login_method,
+                ) {
+                    Ok(start_message) => {
+                        self.add_info_message(start_message.message, start_message.hint);
+                    }
+                    Err(err) => {
+                        self.add_error_message(err);
+                    }
+                }
+            }
             SlashCommand::Copy => {
                 let Some(text) = self.last_copyable_output.as_deref() else {
                     self.add_info_message(

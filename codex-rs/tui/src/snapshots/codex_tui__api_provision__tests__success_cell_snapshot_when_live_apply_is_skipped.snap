@@ -1,0 +1,6 @@
+---
+source: tui/src/api_provision.rs
+assertion_line: 214
+expression: render_cell(&cell)
+---
+• Provisioned an API key for org-default / proj-default and saved CODEX_API_KEY to /tmp/workspace/.env. Saved the key to .env, but left this session unchanged because ChatGPT login is required here.

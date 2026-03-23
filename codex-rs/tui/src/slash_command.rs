@@ -34,6 +34,7 @@ pub enum SlashCommand {
     Agent,
     // Undo,
     Diff,
+    ApiProvision,
     Copy,
     Mention,
     Status,
@@ -82,6 +83,7 @@ impl SlashCommand {
             // SlashCommand::Undo => "ask Codex to undo a turn",
             SlashCommand::Quit | SlashCommand::Exit => "exit Codex",
             SlashCommand::Diff => "show git diff (including untracked files)",
+            SlashCommand::ApiProvision => "provision an API key and save it to .env",
             SlashCommand::Copy => "copy the latest Codex output to your clipboard",
             SlashCommand::Mention => "mention a file",
             SlashCommand::Skills => "use skills to improve how Codex performs specific tasks",
@@ -155,6 +157,7 @@ impl SlashCommand {
             | SlashCommand::Experimental
             | SlashCommand::Review
             | SlashCommand::Plan
+            | SlashCommand::ApiProvision
             | SlashCommand::Clear
             | SlashCommand::Logout
             | SlashCommand::MemoryDrop
@@ -219,5 +222,16 @@ mod tests {
     #[test]
     fn clean_alias_parses_to_stop_command() {
         assert_eq!(SlashCommand::from_str("clean"), Ok(SlashCommand::Stop));
+    }
+
+    #[test]
+    fn api_provision_command_metadata() {
+        assert_eq!(
+            SlashCommand::from_str("api-provision"),
+            Ok(SlashCommand::ApiProvision)
+        );
+        assert_eq!(SlashCommand::ApiProvision.command(), "api-provision");
+        assert!(!SlashCommand::ApiProvision.supports_inline_args());
+        assert!(!SlashCommand::ApiProvision.available_during_task());
     }
 }
