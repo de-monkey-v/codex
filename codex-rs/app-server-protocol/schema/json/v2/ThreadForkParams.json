@@ -126,6 +126,13 @@
     "ephemeral": {
       "type": "boolean"
     },
+    "metadata": {
+      "additionalProperties": true,
+      "type": [
+        "object",
+        "null"
+      ]
+    },
     "model": {
       "description": "Configuration overrides for the forked thread, if any.",
       "type": [

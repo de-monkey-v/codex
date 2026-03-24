@@ -25,6 +25,7 @@ use codex_protocol::openai_models::ReasoningEffort;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use serde_json::json;
+use std::collections::BTreeMap;
 use std::path::Path;
 use tempfile::TempDir;
 use tokio::time::timeout;
@@ -48,10 +49,16 @@ async fn thread_start_creates_thread_and_emits_started() -> Result<()> {
     let mut mcp = McpProcess::new(codex_home.path()).await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
 
+    let metadata = BTreeMap::from([
+        ("clientTag".to_string(), json!("abc")),
+        ("pinned".to_string(), json!(true)),
+    ]);
+
     // Start a v2 thread with an explicit model override.
     let req_id = mcp
         .send_thread_start_request(ThreadStartParams {
             model: Some("gpt-5.1".to_string()),
+            metadata: Some(metadata.clone()),
             ..Default::default()
         })
         .await?;
@@ -89,6 +96,7 @@ async fn thread_start_creates_thread_and_emits_started() -> Result<()> {
         !thread_path.exists(),
         "fresh thread rollout should not be materialized until first user message"
     );
+    assert_eq!(thread.metadata, metadata);
 
     // Wire contract: thread title field is `name`, serialized as null when unset.
     let thread_json = resp_result
@@ -105,6 +113,7 @@ async fn thread_start_creates_thread_and_emits_started() -> Result<()> {
         Some(false),
         "new persistent threads should serialize `ephemeral: false`"
     );
+    assert_eq!(thread_json.get("metadata"), Some(&json!(metadata.clone())));
     assert_eq!(thread.name, None);
 
     // A corresponding thread/started notification should arrive.
@@ -148,6 +157,7 @@ async fn thread_start_creates_thread_and_emits_started() -> Result<()> {
     );
     let started: ThreadStartedNotification =
         serde_json::from_value(notif.params.expect("params must be present"))?;
+    assert_eq!(started.thread.metadata, metadata);
     assert_eq!(started.thread, thread);
 
     Ok(())

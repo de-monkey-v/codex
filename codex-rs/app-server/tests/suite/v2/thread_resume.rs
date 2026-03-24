@@ -57,6 +57,7 @@ use core_test_support::responses;
 use core_test_support::skip_if_no_network;
 use pretty_assertions::assert_eq;
 use serde_json::json;
+use std::collections::BTreeMap;
 use std::fs::FileTimes;
 use std::path::Path;
 use std::path::PathBuf;
@@ -328,6 +329,7 @@ stream_max_retries = 0
         model_provider: Some("mock_provider".to_string()),
         base_instructions: None,
         dynamic_tools: None,
+        metadata: BTreeMap::new(),
         memory_mode: None,
     };
     std::fs::write(

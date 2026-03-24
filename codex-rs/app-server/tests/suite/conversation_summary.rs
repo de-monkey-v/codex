@@ -11,6 +11,7 @@ use codex_app_server_protocol::RequestId;
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::SessionSource;
 use pretty_assertions::assert_eq;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use tempfile::TempDir;
 use tokio::time::timeout;
@@ -32,6 +33,7 @@ fn expected_summary(conversation_id: ThreadId, path: PathBuf) -> ConversationSum
         cwd: PathBuf::from("/"),
         cli_version: "0.0.0".to_string(),
         source: SessionSource::Cli,
+        metadata: BTreeMap::new(),
         git_info: None,
     }
 }

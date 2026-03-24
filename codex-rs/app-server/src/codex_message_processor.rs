@@ -283,6 +283,7 @@ use codex_state::ThreadMetadataBuilder;
 use codex_state::log_db::LogDbLayer;
 use codex_utils_json_to_toml::json_to_toml;
 use codex_utils_pty::DEFAULT_OUTPUT_BYTES_CAP;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ffi::OsStr;
@@ -1850,6 +1851,7 @@ impl CodexMessageProcessor {
             service_name,
             base_instructions,
             developer_instructions,
+            metadata,
             dynamic_tools,
             mock_experimental_field: _mock_experimental_field,
             experimental_raw_events,
@@ -1892,6 +1894,7 @@ impl CodexMessageProcessor {
                 dynamic_tools,
                 persist_extended_history,
                 service_name,
+                metadata.unwrap_or_default(),
                 experimental_raw_events,
                 request_trace,
             )
@@ -1957,6 +1960,7 @@ impl CodexMessageProcessor {
         dynamic_tools: Option<Vec<ApiDynamicToolSpec>>,
         persist_extended_history: bool,
         service_name: Option<String>,
+        thread_metadata: BTreeMap<String, serde_json::Value>,
         experimental_raw_events: bool,
         request_trace: Option<W3cTraceContext>,
     ) {
@@ -2010,12 +2014,13 @@ impl CodexMessageProcessor {
 
         match listener_task_context
             .thread_manager
-            .start_thread_with_tools_and_service_name(
+            .start_thread_with_tools_and_service_name_and_metadata(
                 config,
                 core_dynamic_tools,
                 persist_extended_history,
                 service_name,
                 request_trace,
+                thread_metadata,
             )
             .instrument(tracing::info_span!(
                 "app_server.thread_start.create_thread",
@@ -2613,6 +2618,8 @@ impl CodexMessageProcessor {
             builder.cli_version = Some(env!("CARGO_PKG_VERSION").to_string());
             builder.sandbox_policy = config_snapshot.sandbox_policy.clone();
             builder.approval_mode = config_snapshot.approval_policy;
+            builder.metadata_json = serde_json::to_string(&config_snapshot.metadata)
+                .unwrap_or_else(|_| "{}".to_string());
             let metadata = builder.build(model_provider.as_str());
             if let Err(err) = state_db_ctx.insert_thread_if_absent(&metadata).await {
                 return Err(internal_error(format!(
@@ -3924,6 +3931,7 @@ impl CodexMessageProcessor {
             config: cli_overrides,
             base_instructions,
             developer_instructions,
+            metadata,
             ephemeral,
             persist_extended_history,
         } = params;
@@ -4038,12 +4046,13 @@ impl CodexMessageProcessor {
             ..
         } = match self
             .thread_manager
-            .fork_thread(
+            .fork_thread_with_metadata(
                 ForkSnapshot::Interrupted,
                 config,
                 rollout_path.clone(),
                 persist_extended_history,
                 self.request_trace_context(&request_id).await,
+                metadata.unwrap_or_default(),
             )
             .await
         {
@@ -7951,6 +7960,7 @@ async fn summary_from_thread_list_item(
             cwd,
             cli_version,
             source,
+            metadata: it.metadata,
             git_info: if it.git_sha.is_none()
                 && it.git_branch.is_none()
                 && it.git_origin_url.is_none()
@@ -7997,6 +8007,7 @@ fn summary_from_state_db_metadata(
     source: String,
     agent_nickname: Option<String>,
     agent_role: Option<String>,
+    metadata: BTreeMap<String, serde_json::Value>,
     git_sha: Option<String>,
     git_branch: Option<String>,
     git_origin_url: Option<String>,
@@ -8025,6 +8036,7 @@ fn summary_from_state_db_metadata(
         cwd,
         cli_version,
         source,
+        metadata,
         git_info,
     }
 }
@@ -8046,6 +8058,7 @@ fn summary_from_thread_metadata(metadata: &ThreadMetadata) -> ConversationSummar
         metadata.source.clone(),
         metadata.agent_nickname.clone(),
         metadata.agent_role.clone(),
+        parse_thread_metadata_json(metadata.metadata_json.as_str()),
         metadata.git_sha.clone(),
         metadata.git_branch.clone(),
         metadata.git_origin_url.clone(),
@@ -8122,6 +8135,7 @@ pub(crate) async fn read_summary_from_rollout(
         cwd: session_meta.cwd,
         cli_version: session_meta.cli_version,
         source: session_meta.source,
+        metadata: session_meta.metadata,
         git_info,
     })
 }
@@ -8182,6 +8196,7 @@ fn extract_conversation_summary(
         cwd: session_meta.cwd.clone(),
         cli_version: session_meta.cli_version.clone(),
         source: session_meta.source.clone(),
+        metadata: session_meta.metadata.clone(),
         git_info,
     })
 }
@@ -8223,6 +8238,7 @@ async fn load_thread_summary_for_rollout(
 
 fn merge_mutable_thread_metadata(thread: &mut Thread, persisted_thread: Thread) {
     thread.git_info = persisted_thread.git_info;
+    thread.metadata = persisted_thread.metadata;
 }
 
 fn preview_from_rollout_items(items: &[RolloutItem]) -> String {
@@ -8315,6 +8331,7 @@ fn build_thread_from_snapshot(
         source: config_snapshot.session_source.clone().into(),
         git_info: None,
         name: None,
+        metadata: config_snapshot.metadata.clone(),
         turns: Vec::new(),
     }
 }
@@ -8330,6 +8347,7 @@ pub(crate) fn summary_to_thread(summary: ConversationSummary) -> Thread {
         cwd,
         cli_version,
         source,
+        metadata,
         git_info,
     } = summary;
 
@@ -8357,8 +8375,13 @@ pub(crate) fn summary_to_thread(summary: ConversationSummary) -> Thread {
         source: source.into(),
         git_info,
         name: None,
+        metadata,
         turns: Vec::new(),
     }
+}
+
+fn parse_thread_metadata_json(metadata_json: &str) -> BTreeMap<String, serde_json::Value> {
+    serde_json::from_str(metadata_json).unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -8492,6 +8515,7 @@ mod tests {
             ephemeral: false,
             reasoning_effort: None,
             personality: None,
+            metadata: BTreeMap::new(),
             session_source: SessionSource::Cli,
         };
 
@@ -8728,6 +8752,7 @@ mod tests {
             cwd: PathBuf::from("/"),
             cli_version: "0.0.0".to_string(),
             source: SessionSource::VSCode,
+            metadata: BTreeMap::new(),
             git_info: None,
         };
 
@@ -8784,6 +8809,7 @@ mod tests {
             cwd: PathBuf::new(),
             cli_version: String::new(),
             source: SessionSource::VSCode,
+            metadata: BTreeMap::new(),
             git_info: None,
         };
 
@@ -8921,6 +8947,7 @@ mod tests {
             source,
             Some("atlas".to_string()),
             Some("explorer".to_string()),
+            BTreeMap::new(),
             None,
             None,
             None,

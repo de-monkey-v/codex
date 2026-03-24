@@ -85,6 +85,8 @@ use codex_utils_oss::get_default_model_for_oss_provider;
 use event_processor_with_human_output::EventProcessorWithHumanOutput;
 use event_processor_with_jsonl_output::EventProcessorWithJsonOutput;
 use serde_json::Value;
+#[cfg(test)]
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::io::IsTerminal;
 use std::io::Read;
@@ -1837,6 +1839,7 @@ mod tests {
             agent_role: None,
             git_info: None,
             name: None,
+            metadata: BTreeMap::new(),
             turns: vec![
                 codex_app_server_protocol::Turn {
                     id: "turn-1".to_string(),
@@ -1952,6 +1955,7 @@ mod tests {
                 agent_role: None,
                 git_info: None,
                 name: Some("thread".to_string()),
+                metadata: BTreeMap::new(),
                 turns: vec![],
             },
             model: "gpt-5.4".to_string(),

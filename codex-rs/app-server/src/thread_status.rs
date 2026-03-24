@@ -8,6 +8,8 @@ use codex_app_server_protocol::Thread;
 use codex_app_server_protocol::ThreadActiveFlag;
 use codex_app_server_protocol::ThreadStatus;
 use codex_app_server_protocol::ThreadStatusChangedNotification;
+#[cfg(test)]
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 #[cfg(test)]
 use std::path::PathBuf;
@@ -802,6 +804,7 @@ mod tests {
             source,
             git_info: None,
             name: None,
+            metadata: BTreeMap::new(),
             turns: Vec::new(),
         }
     }

@@ -78,6 +78,8 @@ use codex_protocol::protocol::SessionNetworkProxyRuntime;
 use color_eyre::eyre::ContextCompat;
 use color_eyre::eyre::Result;
 use color_eyre::eyre::WrapErr;
+#[cfg(test)]
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -1147,6 +1149,7 @@ mod tests {
                 agent_role: None,
                 git_info: None,
                 name: None,
+                metadata: BTreeMap::new(),
                 turns: vec![Turn {
                     id: "turn-1".to_string(),
                     items: vec![

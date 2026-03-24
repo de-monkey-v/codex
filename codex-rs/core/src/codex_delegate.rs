@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -84,6 +85,7 @@ pub(crate) async fn run_codex_thread_interactive(
         conversation_history: initial_history.unwrap_or(InitialHistory::New),
         session_source: SessionSource::SubAgent(subagent_source),
         agent_control: parent_session.services.agent_control.clone(),
+        thread_metadata: BTreeMap::new(),
         dynamic_tools: Vec::new(),
         persist_extended_history: false,
         metrics_service_name: None,

@@ -1,4 +1,5 @@
 use crate::model::ThreadMetadata;
+use crate::model::metadata_json_from_map;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::RolloutItem;
@@ -60,6 +61,8 @@ fn apply_session_meta_from_item(metadata: &mut ThreadMetadata, meta_line: &Sessi
     if !meta_line.meta.cwd.as_os_str().is_empty() {
         metadata.cwd = meta_line.meta.cwd.clone();
     }
+    metadata.metadata_json =
+        metadata_json_from_map(&meta_line.meta.metadata).unwrap_or_else(|_| "{}".to_string());
     if let Some(git) = meta_line.git.as_ref() {
         metadata.git_sha = git.commit_hash.clone();
         metadata.git_branch = git.branch.clone();
@@ -157,6 +160,7 @@ mod tests {
     use codex_protocol::protocol::UserMessageEvent;
 
     use pretty_assertions::assert_eq;
+    use std::collections::BTreeMap;
     use std::path::PathBuf;
     use uuid::Uuid;
 
@@ -258,6 +262,7 @@ mod tests {
                     model_provider: Some("openai".to_string()),
                     base_instructions: None,
                     dynamic_tools: None,
+                    metadata: BTreeMap::new(),
                     memory_mode: None,
                 },
                 git: None,
@@ -385,6 +390,7 @@ mod tests {
                     model_provider: Some("openai".to_string()),
                     base_instructions: None,
                     dynamic_tools: None,
+                    metadata: BTreeMap::new(),
                     memory_mode: None,
                 },
                 git: None,
@@ -422,6 +428,7 @@ mod tests {
             git_sha: None,
             git_branch: None,
             git_origin_url: None,
+            metadata_json: "{}".to_string(),
         }
     }
 

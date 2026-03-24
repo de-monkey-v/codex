@@ -239,6 +239,7 @@ async fn skills_changed_notification_is_emitted_after_skill_change() -> Result<(
             service_name: None,
             base_instructions: None,
             developer_instructions: None,
+            metadata: None,
             personality: None,
             ephemeral: None,
             dynamic_tools: None,

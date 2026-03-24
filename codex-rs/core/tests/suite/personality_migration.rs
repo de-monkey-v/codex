@@ -14,6 +14,7 @@ use codex_protocol::protocol::SessionMetaLine;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::UserMessageEvent;
 use pretty_assertions::assert_eq;
+use std::collections::BTreeMap;
 use std::io;
 use std::path::Path;
 use tempfile::TempDir;
@@ -72,6 +73,7 @@ async fn write_rollout_with_user_event(dir: &Path, thread_id: ThreadId) -> io::R
             model_provider: None,
             base_instructions: None,
             dynamic_tools: None,
+            metadata: BTreeMap::new(),
             memory_mode: None,
         },
         git: None,
@@ -117,6 +119,7 @@ async fn write_rollout_with_meta_only(dir: &Path, thread_id: ThreadId) -> io::Re
             model_provider: None,
             base_instructions: None,
             dynamic_tools: None,
+            metadata: BTreeMap::new(),
             memory_mode: None,
         },
         git: None,

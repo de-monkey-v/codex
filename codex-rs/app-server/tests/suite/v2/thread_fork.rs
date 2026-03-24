@@ -29,6 +29,7 @@ use codex_core::auth::REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use serde_json::json;
+use std::collections::BTreeMap;
 use std::path::Path;
 use tempfile::TempDir;
 use tokio::time::timeout;
@@ -75,9 +76,14 @@ async fn thread_fork_creates_new_thread_and_emits_started() -> Result<()> {
     let mut mcp = McpProcess::new(codex_home.path()).await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
 
+    let metadata = BTreeMap::from([
+        ("clientTag".to_string(), json!("forked")),
+        ("pinned".to_string(), json!(false)),
+    ]);
     let fork_id = mcp
         .send_thread_fork_request(ThreadForkParams {
             thread_id: conversation_id.clone(),
+            metadata: Some(metadata.clone()),
             ..Default::default()
         })
         .await?;
@@ -99,6 +105,7 @@ async fn thread_fork_creates_new_thread_and_emits_started() -> Result<()> {
         Some(&Value::Null),
         "forked threads do not inherit a name; expected `name: null`"
     );
+    assert_eq!(thread_json.get("metadata"), Some(&json!(metadata.clone())));
 
     let after_contents = std::fs::read_to_string(&original_path)?;
     assert_eq!(
@@ -110,6 +117,7 @@ async fn thread_fork_creates_new_thread_and_emits_started() -> Result<()> {
     assert_eq!(thread.preview, preview);
     assert_eq!(thread.model_provider, "mock_provider");
     assert_eq!(thread.status, ThreadStatus::Idle);
+    assert_eq!(thread.metadata, metadata);
     let thread_path = thread.path.clone().expect("thread path");
     assert!(thread_path.is_absolute());
     assert_ne!(thread_path, original_path);
@@ -172,6 +180,7 @@ async fn thread_fork_creates_new_thread_and_emits_started() -> Result<()> {
     );
     let started: ThreadStartedNotification =
         serde_json::from_value(notif.params.expect("params must be present"))?;
+    assert_eq!(started.thread.metadata, metadata);
     assert_eq!(started.thread, thread);
 
     Ok(())

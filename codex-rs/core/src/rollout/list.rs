@@ -1,5 +1,7 @@
 use async_trait::async_trait;
+use serde_json::Value;
 use std::cmp::Reverse;
+use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::io::{self};
 use std::num::NonZero;
@@ -71,6 +73,8 @@ pub struct ThreadItem {
     /// RFC3339 timestamp string for the most recent update (from file mtime).
     /// updated_at is truncated to second precision to match created_at.
     pub updated_at: Option<String>,
+    /// Arbitrary client-defined thread metadata from session metadata.
+    pub metadata: BTreeMap<String, Value>,
 }
 
 #[allow(dead_code)]
@@ -97,6 +101,7 @@ struct HeadTailSummary {
     cli_version: Option<String>,
     created_at: Option<String>,
     updated_at: Option<String>,
+    metadata: BTreeMap<String, Value>,
 }
 
 /// Hard cap to bound worst‑case work per request.
@@ -727,6 +732,7 @@ async fn build_thread_item(
             cli_version,
             created_at,
             updated_at: mut summary_updated_at,
+            metadata,
             ..
         } = summary;
         if summary_updated_at.is_none() {
@@ -747,6 +753,7 @@ async fn build_thread_item(
             cli_version,
             created_at,
             updated_at: summary_updated_at,
+            metadata,
         });
     }
     None
@@ -1046,6 +1053,7 @@ async fn read_head_summary(path: &Path, head_limit: usize) -> io::Result<HeadTai
                         .and_then(|git| git.repository_url.clone());
                     summary.cli_version = Some(session_meta_line.meta.cli_version);
                     summary.created_at = Some(session_meta_line.meta.timestamp.clone());
+                    summary.metadata = session_meta_line.meta.metadata;
                     summary.saw_session_meta = true;
                 }
             }

@@ -8,6 +8,7 @@ use codex_protocol::protocol::SessionMetaLine;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::UserMessageEvent;
 use pretty_assertions::assert_eq;
+use std::collections::BTreeMap;
 use tempfile::TempDir;
 use tokio::io::AsyncWriteExt;
 
@@ -44,6 +45,7 @@ async fn write_session_with_user_event(codex_home: &Path) -> io::Result<()> {
             model_provider: None,
             base_instructions: None,
             dynamic_tools: None,
+            metadata: BTreeMap::new(),
             memory_mode: None,
         },
         git: None,

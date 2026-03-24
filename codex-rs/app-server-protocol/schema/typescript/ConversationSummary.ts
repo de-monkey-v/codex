@@ -4,5 +4,6 @@
 import type { ConversationGitInfo } from "./ConversationGitInfo";
 import type { SessionSource } from "./SessionSource";
 import type { ThreadId } from "./ThreadId";
+import type { JsonValue } from "./serde_json/JsonValue";
 
-export type ConversationSummary = { conversationId: ThreadId, path: string, preview: string, timestamp: string | null, updatedAt: string | null, modelProvider: string, cwd: string, cliVersion: string, source: SessionSource, gitInfo: ConversationGitInfo | null, };
+export type ConversationSummary = { conversationId: ThreadId, path: string, preview: string, timestamp: string | null, updatedAt: string | null, modelProvider: string, cwd: string, cliVersion: string, source: SessionSource, metadata?: { [key in string]?: JsonValue }, gitInfo: ConversationGitInfo | null, };

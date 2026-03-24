@@ -1033,6 +1033,7 @@ mod tests {
     use codex_protocol::protocol::TurnAbortReason;
     use codex_protocol::protocol::TurnAbortedEvent;
     use pretty_assertions::assert_eq;
+    use std::collections::BTreeMap;
     use std::path::PathBuf;
 
     #[test]
@@ -1261,6 +1262,7 @@ mod tests {
             agent_role: None,
             git_info: None,
             name: None,
+            metadata: BTreeMap::new(),
             turns: vec![Turn {
                 id: "turn-1".to_string(),
                 items: vec![ThreadItem::CommandExecution {
@@ -1427,6 +1429,7 @@ mod tests {
                 agent_role: None,
                 git_info: None,
                 name: Some("restore".to_string()),
+                metadata: BTreeMap::new(),
                 turns: vec![
                     Turn {
                         id: "turn-complete".to_string(),

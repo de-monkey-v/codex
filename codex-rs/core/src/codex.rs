@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Debug;
@@ -406,6 +407,7 @@ pub(crate) struct CodexSpawnArgs {
     pub(crate) file_watcher: Arc<FileWatcher>,
     pub(crate) conversation_history: InitialHistory,
     pub(crate) session_source: SessionSource,
+    pub(crate) thread_metadata: BTreeMap<String, Value>,
     pub(crate) agent_control: AgentControl,
     pub(crate) dynamic_tools: Vec<DynamicToolSpec>,
     pub(crate) persist_extended_history: bool,
@@ -459,6 +461,7 @@ impl Codex {
             file_watcher,
             conversation_history,
             session_source,
+            thread_metadata,
             agent_control,
             dynamic_tools,
             persist_extended_history,
@@ -621,6 +624,7 @@ impl Codex {
             metrics_service_name,
             app_server_client_name: None,
             session_source,
+            metadata: thread_metadata,
             dynamic_tools,
             persist_extended_history,
             inherited_shell_snapshot,
@@ -1080,6 +1084,7 @@ pub(crate) struct SessionConfiguration {
     codex_home: PathBuf,
     /// Optional user-facing name for the thread, updated during the session.
     thread_name: Option<String>,
+    metadata: BTreeMap<String, Value>,
 
     // TODO(pakrym): Remove config from here
     original_config_do_not_use: Arc<Config>,
@@ -1112,6 +1117,7 @@ impl SessionConfiguration {
             reasoning_effort: self.collaboration_mode.reasoning_effort(),
             personality: self.personality,
             session_source: self.session_source.clone(),
+            metadata: self.metadata.clone(),
         }
     }
 
@@ -1461,13 +1467,14 @@ impl Session {
                 let conversation_id = ThreadId::default();
                 (
                     conversation_id,
-                    RolloutRecorderParams::new(
+                    RolloutRecorderParams::new_with_metadata(
                         conversation_id,
                         forked_from_id,
                         session_source,
                         BaseInstructions {
                             text: session_configuration.base_instructions.clone(),
                         },
+                        session_configuration.metadata.clone(),
                         session_configuration.dynamic_tools.clone(),
                         if session_configuration.persist_extended_history {
                             EventPersistenceMode::Extended

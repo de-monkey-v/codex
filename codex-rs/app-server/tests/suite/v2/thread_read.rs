@@ -29,6 +29,8 @@ use codex_protocol::user_input::TextElement;
 use core_test_support::responses;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
+use serde_json::json;
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -161,9 +163,11 @@ async fn thread_read_loaded_thread_returns_precomputed_path_before_materializati
     let mut mcp = McpProcess::new(codex_home.path()).await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
 
+    let metadata = BTreeMap::from([("clientTag".to_string(), json!("loaded"))]);
     let start_id = mcp
         .send_thread_start_request(ThreadStartParams {
             model: Some("mock-model".to_string()),
+            metadata: Some(metadata.clone()),
             ..Default::default()
         })
         .await?;
@@ -174,6 +178,7 @@ async fn thread_read_loaded_thread_returns_precomputed_path_before_materializati
     .await??;
     let ThreadStartResponse { thread, .. } = to_response::<ThreadStartResponse>(start_resp)?;
     let thread_path = thread.path.clone().expect("thread path");
+    assert_eq!(thread.metadata, metadata);
     assert!(
         !thread_path.exists(),
         "fresh thread rollout should not be materialized yet"
@@ -195,6 +200,7 @@ async fn thread_read_loaded_thread_returns_precomputed_path_before_materializati
     assert_eq!(read.id, thread.id);
     assert_eq!(read.path, Some(thread_path));
     assert!(read.preview.is_empty());
+    assert_eq!(read.metadata, metadata);
     assert_eq!(read.turns.len(), 0);
     assert_eq!(read.status, ThreadStatus::Idle);
 

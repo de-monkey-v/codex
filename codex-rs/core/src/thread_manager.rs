@@ -42,6 +42,8 @@ use codex_protocol::protocol::TurnAbortedEvent;
 use codex_protocol::protocol::W3cTraceContext;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
+use serde_json::Value;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -432,11 +434,32 @@ impl ThreadManager {
         metrics_service_name: Option<String>,
         parent_trace: Option<W3cTraceContext>,
     ) -> CodexResult<NewThread> {
+        Box::pin(self.start_thread_with_tools_and_service_name_and_metadata(
+            config,
+            dynamic_tools,
+            persist_extended_history,
+            metrics_service_name,
+            parent_trace,
+            BTreeMap::new(),
+        ))
+        .await
+    }
+
+    pub async fn start_thread_with_tools_and_service_name_and_metadata(
+        &self,
+        config: Config,
+        dynamic_tools: Vec<codex_protocol::dynamic_tools::DynamicToolSpec>,
+        persist_extended_history: bool,
+        metrics_service_name: Option<String>,
+        parent_trace: Option<W3cTraceContext>,
+        thread_metadata: BTreeMap<String, Value>,
+    ) -> CodexResult<NewThread> {
         Box::pin(self.state.spawn_thread(
             config,
             InitialHistory::New,
             Arc::clone(&self.state.auth_manager),
             self.agent_control(),
+            thread_metadata,
             dynamic_tools,
             persist_extended_history,
             metrics_service_name,
@@ -477,6 +500,7 @@ impl ThreadManager {
             initial_history,
             auth_manager,
             self.agent_control(),
+            BTreeMap::new(),
             Vec::new(),
             persist_extended_history,
             /*metrics_service_name*/ None,
@@ -496,6 +520,7 @@ impl ThreadManager {
             InitialHistory::New,
             Arc::clone(&self.state.auth_manager),
             self.agent_control(),
+            BTreeMap::new(),
             Vec::new(),
             /*persist_extended_history*/ false,
             /*metrics_service_name*/ None,
@@ -518,6 +543,7 @@ impl ThreadManager {
             initial_history,
             auth_manager,
             self.agent_control(),
+            BTreeMap::new(),
             Vec::new(),
             /*persist_extended_history*/ false,
             /*metrics_service_name*/ None,
@@ -600,6 +626,29 @@ impl ThreadManager {
     where
         S: Into<ForkSnapshot>,
     {
+        Box::pin(self.fork_thread_with_metadata(
+            snapshot,
+            config,
+            path,
+            persist_extended_history,
+            parent_trace,
+            BTreeMap::new(),
+        ))
+        .await
+    }
+
+    pub async fn fork_thread_with_metadata<S>(
+        &self,
+        snapshot: S,
+        config: Config,
+        path: PathBuf,
+        persist_extended_history: bool,
+        parent_trace: Option<W3cTraceContext>,
+        thread_metadata: BTreeMap<String, Value>,
+    ) -> CodexResult<NewThread>
+    where
+        S: Into<ForkSnapshot>,
+    {
         let snapshot = snapshot.into();
         let history = RolloutRecorder::get_rollout_history(&path).await?;
         let snapshot_state = snapshot_turn_state(&history);
@@ -625,6 +674,7 @@ impl ThreadManager {
             history,
             Arc::clone(&self.state.auth_manager),
             self.agent_control(),
+            thread_metadata,
             Vec::new(),
             persist_extended_history,
             /*metrics_service_name*/ None,
@@ -724,6 +774,7 @@ impl ThreadManagerState {
             Arc::clone(&self.auth_manager),
             agent_control,
             session_source,
+            BTreeMap::new(),
             Vec::new(),
             persist_extended_history,
             metrics_service_name,
@@ -751,6 +802,7 @@ impl ThreadManagerState {
             Arc::clone(&self.auth_manager),
             agent_control,
             session_source,
+            BTreeMap::new(),
             Vec::new(),
             /*persist_extended_history*/ false,
             /*metrics_service_name*/ None,
@@ -779,6 +831,7 @@ impl ThreadManagerState {
             Arc::clone(&self.auth_manager),
             agent_control,
             session_source,
+            BTreeMap::new(),
             Vec::new(),
             persist_extended_history,
             /*metrics_service_name*/ None,
@@ -798,6 +851,7 @@ impl ThreadManagerState {
         initial_history: InitialHistory,
         auth_manager: Arc<AuthManager>,
         agent_control: AgentControl,
+        thread_metadata: BTreeMap<String, Value>,
         dynamic_tools: Vec<codex_protocol::dynamic_tools::DynamicToolSpec>,
         persist_extended_history: bool,
         metrics_service_name: Option<String>,
@@ -810,6 +864,7 @@ impl ThreadManagerState {
             auth_manager,
             agent_control,
             self.session_source.clone(),
+            thread_metadata,
             dynamic_tools,
             persist_extended_history,
             metrics_service_name,
@@ -829,6 +884,7 @@ impl ThreadManagerState {
         auth_manager: Arc<AuthManager>,
         agent_control: AgentControl,
         session_source: SessionSource,
+        thread_metadata: BTreeMap<String, Value>,
         dynamic_tools: Vec<codex_protocol::dynamic_tools::DynamicToolSpec>,
         persist_extended_history: bool,
         metrics_service_name: Option<String>,
@@ -852,6 +908,7 @@ impl ThreadManagerState {
             file_watcher: Arc::clone(&self.file_watcher),
             conversation_history: initial_history,
             session_source,
+            thread_metadata,
             agent_control,
             dynamic_tools,
             persist_extended_history,

@@ -11775,6 +11775,12 @@
           "id": {
             "type": "string"
           },
+          "metadata": {
+            "additionalProperties": true,
+            "default": {},
+            "description": "Arbitrary client-defined metadata set when the thread was created.",
+            "type": "object"
+          },
           "modelProvider": {
             "description": "Model provider used for this thread (for example, 'openai').",
             "type": "string"
@@ -11962,6 +11968,13 @@
           },
           "ephemeral": {
             "type": "boolean"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": [
+              "object",
+              "null"
+            ]
           },
           "model": {
             "description": "Configuration overrides for the forked thread, if any.",
@@ -13461,6 +13474,13 @@
           "ephemeral": {
             "type": [
               "boolean",
+              "null"
+            ]
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": [
+              "object",
               "null"
             ]
           },

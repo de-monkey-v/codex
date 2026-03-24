@@ -14,6 +14,7 @@ use codex_protocol::protocol::SessionSource;
 use codex_state::BackfillStatus;
 use codex_state::ThreadMetadataBuilder;
 use pretty_assertions::assert_eq;
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
@@ -44,6 +45,7 @@ async fn extract_metadata_from_rollout_uses_session_meta() {
         model_provider: Some("openai".to_string()),
         base_instructions: None,
         dynamic_tools: None,
+        metadata: BTreeMap::new(),
         memory_mode: None,
     };
     let session_meta_line = SessionMetaLine {
@@ -95,6 +97,7 @@ async fn extract_metadata_from_rollout_returns_latest_memory_mode() {
         model_provider: Some("openai".to_string()),
         base_instructions: None,
         dynamic_tools: None,
+        metadata: BTreeMap::new(),
         memory_mode: None,
     };
     let polluted_meta = SessionMeta {
@@ -363,6 +366,7 @@ fn write_rollout_in_sessions_with_cwd(
         model_provider: Some("test-provider".to_string()),
         base_instructions: None,
         dynamic_tools: None,
+        metadata: BTreeMap::new(),
         memory_mode: None,
     };
     let session_meta_line = SessionMetaLine {

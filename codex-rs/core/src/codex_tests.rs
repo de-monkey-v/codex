@@ -104,6 +104,7 @@ use rmcp::model::JsonObject;
 use rmcp::model::Tool;
 use serde::Deserialize;
 use serde_json::json;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
@@ -1168,24 +1169,31 @@ async fn fork_startup_context_then_first_turn_diff_snapshot() -> anyhow::Result<
         .await?;
     wait_for_event(&initial.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
     // The parent rollout writer drains asynchronously after turn completion.
-    // Wait until the persisted JSONL includes the source user turn before forking from it.
+    // Wait until the persisted JSONL includes the completed source turn before
+    // forking from it.
     let mut source_history_persisted = false;
     for _ in 0..100 {
         let history = RolloutRecorder::get_rollout_history(&rollout_path).await;
         source_history_persisted = history.ok().is_some_and(|history| {
-            history.get_rollout_items().into_iter().any(|item| {
+            let items = history.get_rollout_items();
+            let has_user_turn = items.iter().any(|item| {
                 matches!(
-                        item,
-                        RolloutItem::ResponseItem(ResponseItem::Message { role, content, .. })
-                            if role == "user"
-                                && content.iter().any(|content_item| {
-                                    matches!(
-                                        content_item,
-                                        ContentItem::InputText { text } if text == "fork seed"
-                                    )
-                                })
+                    item,
+                    RolloutItem::ResponseItem(ResponseItem::Message { role, content, .. })
+                        if role == "user"
+                            && content.iter().any(|content_item| {
+                                matches!(
+                                    content_item,
+                                    ContentItem::InputText { text } if text == "fork seed"
+                                )
+                            })
                 )
-            })
+            });
+            let has_turn_complete = items
+                .iter()
+                .any(|item| matches!(item, RolloutItem::EventMsg(EventMsg::TurnComplete(_))));
+
+            has_user_turn && has_turn_complete
         });
         if source_history_persisted {
             break;
@@ -1194,7 +1202,7 @@ async fn fork_startup_context_then_first_turn_diff_snapshot() -> anyhow::Result<
     }
     assert!(
         source_history_persisted,
-        "source rollout should contain the completed pre-fork user turn before forking"
+        "source rollout should contain the completed pre-fork turn before forking"
     );
 
     let mut fork_config = initial.config.clone();
@@ -1805,6 +1813,7 @@ async fn set_rate_limits_retains_previous_credits() {
         user_instructions: config.user_instructions.clone(),
         service_tier: None,
         personality: config.personality,
+        metadata: BTreeMap::new(),
         base_instructions: config
             .base_instructions
             .clone()
@@ -1903,6 +1912,7 @@ async fn set_rate_limits_updates_plan_type_when_present() {
         user_instructions: config.user_instructions.clone(),
         service_tier: None,
         personality: config.personality,
+        metadata: BTreeMap::new(),
         base_instructions: config
             .base_instructions
             .clone()
@@ -2247,6 +2257,7 @@ pub(crate) async fn make_session_configuration_for_tests() -> SessionConfigurati
         user_instructions: config.user_instructions.clone(),
         service_tier: None,
         personality: config.personality,
+        metadata: BTreeMap::new(),
         base_instructions: config
             .base_instructions
             .clone()
@@ -2478,6 +2489,7 @@ async fn session_new_fails_when_zsh_fork_enabled_without_zsh_path() {
         user_instructions: config.user_instructions.clone(),
         service_tier: None,
         personality: config.personality,
+        metadata: BTreeMap::new(),
         base_instructions: config
             .base_instructions
             .clone()
@@ -2573,6 +2585,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         user_instructions: config.user_instructions.clone(),
         service_tier: None,
         personality: config.personality,
+        metadata: BTreeMap::new(),
         base_instructions: config
             .base_instructions
             .clone()
@@ -3408,6 +3421,7 @@ pub(crate) async fn make_session_and_context_with_dynamic_tools_and_rx(
         user_instructions: config.user_instructions.clone(),
         service_tier: None,
         personality: config.personality,
+        metadata: BTreeMap::new(),
         base_instructions: config
             .base_instructions
             .clone()

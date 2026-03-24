@@ -33,6 +33,7 @@ use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use pretty_assertions::assert_eq;
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fs;
 use std::sync::Arc;
@@ -450,6 +451,7 @@ async fn guardian_subagent_does_not_inherit_parent_exec_policy_rules() {
             GUARDIAN_REVIEWER_NAME.to_string(),
         )),
         agent_control: AgentControl::default(),
+        thread_metadata: BTreeMap::new(),
         dynamic_tools: Vec::new(),
         persist_extended_history: false,
         metrics_service_name: None,

@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -18,6 +19,7 @@ use codex_utils_absolute_path::AbsolutePathBuf;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json::Value as JsonValue;
 use ts_rs::TS;
 
 use crate::protocol::common::AuthMode;
@@ -95,6 +97,8 @@ pub struct ConversationSummary {
     pub cwd: PathBuf,
     pub cli_version: String,
     pub source: SessionSource,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub metadata: BTreeMap<String, JsonValue>,
     pub git_info: Option<ConversationGitInfo>,
 }
 

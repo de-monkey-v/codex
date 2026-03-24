@@ -1,3 +1,5 @@
+#[cfg(test)]
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::Path;
@@ -2574,6 +2576,7 @@ mod tests {
             agent_role: None,
             git_info: None,
             name: Some(String::from("Named thread")),
+            metadata: BTreeMap::new(),
             turns: Vec::new(),
         };
 

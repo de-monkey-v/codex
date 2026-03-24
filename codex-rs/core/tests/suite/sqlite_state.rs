@@ -30,6 +30,7 @@ use core_test_support::wait_for_event;
 use core_test_support::wait_for_event_match;
 use pretty_assertions::assert_eq;
 use serde_json::json;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fs;
 use tokio::time::Duration;
@@ -147,6 +148,7 @@ async fn backfill_scans_existing_rollouts() -> Result<()> {
                     model_provider: None,
                     base_instructions: None,
                     dynamic_tools: Some(dynamic_tools_for_hook),
+                    metadata: BTreeMap::new(),
                     memory_mode: None,
                 },
                 git: None,

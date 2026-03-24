@@ -5,6 +5,7 @@ use codex_protocol::protocol::SessionMeta;
 use codex_protocol::protocol::SessionMetaLine;
 use codex_protocol::protocol::SessionSource;
 use serde_json::json;
+use std::collections::BTreeMap;
 use std::fs;
 use std::fs::FileTimes;
 use std::path::Path;
@@ -85,6 +86,7 @@ pub fn create_fake_rollout_with_source(
         model_provider: model_provider.map(str::to_string),
         base_instructions: None,
         dynamic_tools: None,
+        metadata: BTreeMap::new(),
         memory_mode: None,
     };
     let payload = serde_json::to_value(SessionMetaLine {
@@ -168,6 +170,7 @@ pub fn create_fake_rollout_with_text_elements(
         model_provider: model_provider.map(str::to_string),
         base_instructions: None,
         dynamic_tools: None,
+        metadata: BTreeMap::new(),
         memory_mode: None,
     };
     let payload = serde_json::to_value(SessionMetaLine {

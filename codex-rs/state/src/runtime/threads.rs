@@ -27,7 +27,8 @@ SELECT
     archived_at,
     git_sha,
     git_branch,
-    git_origin_url
+    git_origin_url,
+    metadata_json
 FROM threads
 WHERE id = ?
             "#,
@@ -364,7 +365,8 @@ SELECT
     archived_at,
     git_sha,
     git_branch,
-    git_origin_url
+    git_origin_url,
+    metadata_json
 FROM threads
             "#,
         );
@@ -467,8 +469,9 @@ INSERT INTO threads (
     git_sha,
     git_branch,
     git_origin_url,
+    metadata_json,
     memory_mode
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO NOTHING
             "#,
         )
@@ -500,6 +503,7 @@ ON CONFLICT(id) DO NOTHING
         .bind(metadata.git_sha.as_deref())
         .bind(metadata.git_branch.as_deref())
         .bind(metadata.git_origin_url.as_deref())
+        .bind(metadata.metadata_json.as_str())
         .bind("enabled")
         .execute(self.pool.as_ref())
         .await?;
@@ -594,8 +598,9 @@ INSERT INTO threads (
     git_sha,
     git_branch,
     git_origin_url,
+    metadata_json,
     memory_mode
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
     rollout_path = excluded.rollout_path,
     created_at = excluded.created_at,
@@ -618,7 +623,8 @@ ON CONFLICT(id) DO UPDATE SET
     archived_at = excluded.archived_at,
     git_sha = excluded.git_sha,
     git_branch = excluded.git_branch,
-    git_origin_url = excluded.git_origin_url
+    git_origin_url = excluded.git_origin_url,
+    metadata_json = excluded.metadata_json
             "#,
         )
         .bind(metadata.id.to_string())
@@ -649,6 +655,7 @@ ON CONFLICT(id) DO UPDATE SET
         .bind(metadata.git_sha.as_deref())
         .bind(metadata.git_branch.as_deref())
         .bind(metadata.git_origin_url.as_deref())
+        .bind(metadata.metadata_json.as_str())
         .bind(creation_memory_mode.unwrap_or("enabled"))
         .execute(self.pool.as_ref())
         .await?;
@@ -724,6 +731,7 @@ ON CONFLICT(thread_id, position) DO NOTHING
         }
         if let Some(existing_metadata) = existing_metadata.as_ref() {
             metadata.prefer_existing_git_info(existing_metadata);
+            metadata.prefer_existing_metadata(existing_metadata);
         }
         let updated_at = match updated_at_override {
             Some(updated_at) => Some(updated_at),
@@ -955,6 +963,7 @@ mod tests {
     use codex_protocol::protocol::SessionMetaLine;
     use codex_protocol::protocol::SessionSource;
     use pretty_assertions::assert_eq;
+    use std::collections::BTreeMap;
     use std::path::PathBuf;
 
     #[tokio::test]
@@ -1031,6 +1040,7 @@ mod tests {
                 model_provider: None,
                 base_instructions: None,
                 dynamic_tools: None,
+                metadata: BTreeMap::new(),
                 memory_mode: Some("polluted".to_string()),
             },
             git: None,
@@ -1086,6 +1096,7 @@ mod tests {
                 model_provider: None,
                 base_instructions: None,
                 dynamic_tools: None,
+                metadata: BTreeMap::new(),
                 memory_mode: None,
             },
             git: Some(GitInfo {
