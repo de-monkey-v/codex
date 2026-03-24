@@ -494,8 +494,10 @@ jobs:
 
       # Save caches explicitly; make non-fatal so cache packaging
       # never fails the overall job. Only save when key wasn't hit.
+      # Lint/build jobs already save this cache key. Skipping the redundant
+      # Windows test-job save keeps the test jobs within their timeout budget.
       - name: Save cargo home cache
-        if: always() && !cancelled() && steps.cache_cargo_home_restore.outputs.cache-hit != 'true'
+        if: always() && !cancelled() && !startsWith(matrix.runner, 'windows') && steps.cache_cargo_home_restore.outputs.cache-hit != 'true'
         continue-on-error: true
         uses: actions/cache/save@v5
         with:

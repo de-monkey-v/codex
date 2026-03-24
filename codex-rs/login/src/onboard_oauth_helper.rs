@@ -511,14 +511,17 @@ fn handle_callback_request(
         Ok(url) => url,
         Err(err) => {
             return CallbackResponse {
-                response: html_response(400, format!("<h1>Bad Request</h1><p>{err}</p>")),
+                response: html_response(
+                    /*status*/ 400,
+                    format!("<h1>Bad Request</h1><p>{err}</p>"),
+                ),
                 result: None,
             };
         }
     };
     if parsed_url.path() != callback_path {
         return CallbackResponse {
-            response: html_response(404, "<h1>Not Found</h1>".to_string()),
+            response: html_response(/*status*/ 404, "<h1>Not Found</h1>".to_string()),
             result: None,
         };
     }
@@ -526,7 +529,7 @@ fn handle_callback_request(
     let params: HashMap<String, String> = parsed_url.query_pairs().into_owned().collect();
     if params.get("state").map(String::as_str) != Some(expected_state) {
         return CallbackResponse {
-            response: html_response(400, "<h1>State mismatch</h1>".to_string()),
+            response: html_response(/*status*/ 400, "<h1>State mismatch</h1>".to_string()),
             result: Some(Err("State mismatch in OAuth callback.".to_string())),
         };
     }
@@ -537,7 +540,7 @@ fn handle_callback_request(
         );
         return CallbackResponse {
             response: html_response(
-                403,
+                /*status*/ 403,
                 "<h1>Sign-in failed</h1><p>Return to your terminal.</p>".to_string(),
             ),
             result: Some(Err(message)),
@@ -546,13 +549,16 @@ fn handle_callback_request(
     match params.get("code") {
         Some(code) if !code.is_empty() => CallbackResponse {
             response: html_response(
-                200,
+                /*status*/ 200,
                 "<h1>Sign-in complete</h1><p>You can return to your terminal.</p>".to_string(),
             ),
             result: Some(Ok(code.clone())),
         },
         _ => CallbackResponse {
-            response: html_response(400, "<h1>Missing authorization code</h1>".to_string()),
+            response: html_response(
+                /*status*/ 400,
+                "<h1>Missing authorization code</h1>".to_string(),
+            ),
             result: Some(Err(
                 "Missing authorization code. Sign-in could not be completed.".to_string(),
             )),
