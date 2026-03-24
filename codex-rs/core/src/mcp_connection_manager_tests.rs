@@ -2,6 +2,7 @@ use super::*;
 use codex_protocol::protocol::GranularApprovalConfig;
 use codex_protocol::protocol::McpAuthStatus;
 use rmcp::model::JsonObject;
+use rmcp::model::ServerResult;
 use std::collections::HashSet;
 use std::sync::Arc;
 use tempfile::tempdir;
@@ -122,6 +123,42 @@ fn test_qualify_tools_duplicated_names_skipped() {
     // Only the first tool should remain, the second is skipped
     assert_eq!(qualified_tools.len(), 1);
     assert!(qualified_tools.contains_key("mcp__server1__duplicate_tool"));
+}
+
+#[test]
+fn parse_openai_file_bridge_response_extracts_arguments() {
+    let response = ServerResult::CustomResult(rmcp::model::CustomResult::new(serde_json::json!({
+        "arguments": {
+            "file": {
+                "file_id": "file_123",
+            }
+        }
+    })));
+
+    let arguments = parse_openai_file_bridge_response(response).expect("parse response");
+
+    assert_eq!(
+        arguments,
+        serde_json::json!({
+            "file": {
+                "file_id": "file_123",
+            }
+        })
+    );
+}
+
+#[test]
+fn parse_openai_file_bridge_response_rejects_non_custom_result() {
+    let error =
+        parse_openai_file_bridge_response(ServerResult::EmptyResult(rmcp::model::EmptyResult {}))
+            .expect_err("non-custom response should fail");
+
+    assert!(
+        error
+            .to_string()
+            .contains("expected custom result from `openai/file-bridge` request"),
+        "unexpected error: {error:#}"
+    );
 }
 
 #[test]
