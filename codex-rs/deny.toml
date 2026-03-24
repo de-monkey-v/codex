@@ -130,6 +130,9 @@ allow = [
     # Unicode-3.0 - https://opensource.org/license/unicode
     # Used by: icu_decimal, icu_locale_core, icu_provider
     "Unicode-3.0",
+    # WTFPL - https://www.wtfpl.net/
+    # Used by: ffmpeg-next, ffmpeg-sys-next
+    "WTFPL",
     # Unlicense - https://opensource.org/license/unlicense/
     # Used by: ignore, walkdir
     "Unlicense",

@@ -2,7 +2,7 @@ use super::backend::CaptureBackend;
 use super::backend::CaptureBackendFailure;
 use super::backend::CapturedDisplay;
 use super::backend::DisplayGeometry;
-use super::encoder::GifSegmentEncoder;
+use super::encoder::FfmpegSegmentEncoder;
 use chrono::DateTime;
 use chrono::Utc;
 use image::ColorType;
@@ -25,7 +25,7 @@ pub(crate) const RETENTION_HOURS: u32 = 6;
 pub(crate) const RETENTION_SECONDS: i64 = 6 * 60 * 60;
 pub(crate) const SEGMENT_LENGTH_SECONDS: i64 = 30 * 60;
 pub(crate) const DISPLAY_REMOVAL_MISSED_TICKS: u32 = 3;
-const MANIFEST_FILE_EXTENSION: &str = "gif.json";
+const MANIFEST_FILE_EXTENSION: &str = "mp4.json";
 
 #[derive(Default)]
 pub(crate) struct CaptureState {
@@ -50,7 +50,7 @@ struct SegmentState {
     manifest_path: PathBuf,
     latest_frame_path: PathBuf,
     bucket_start_at: i64,
-    encoder: GifSegmentEncoder,
+    encoder: FfmpegSegmentEncoder,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -144,7 +144,7 @@ pub(crate) fn prune_old_segments(
                 && entry
                     .path()
                     .to_str()
-                    .is_some_and(|path| path.ends_with(".gif.json"))
+                    .is_some_and(|path| path.ends_with(".mp4.json"))
         })
         .map(walkdir::DirEntry::into_path)
         .collect::<Vec<_>>();
@@ -248,7 +248,7 @@ fn open_segment(
         captured_at.format("%Y-%m-%dT%H-%M-%SZ"),
         display.id
     );
-    let segment_path = storage_root.join(format!("{segment_name}.gif"));
+    let segment_path = storage_root.join(format!("{segment_name}.mp4"));
     let manifest_path = segment_path.with_extension(MANIFEST_FILE_EXTENSION);
     let manifest = SegmentManifest {
         version: 1,
@@ -265,7 +265,7 @@ fn open_segment(
     };
     write_manifest(&manifest_path, &manifest)?;
     let encoder =
-        GifSegmentEncoder::open(&segment_path, encoded_width, encoded_height, CAPTURE_FPS)?;
+        FfmpegSegmentEncoder::open(&segment_path, encoded_width, encoded_height, CAPTURE_FPS)?;
     Ok(SegmentState {
         manifest_path,
         latest_frame_path: storage_root.join(format!("{segment_name}-latest.jpg")),
@@ -457,14 +457,14 @@ mod tests {
                     && entry
                         .path()
                         .extension()
-                        .is_some_and(|extension| extension == "gif")
+                        .is_some_and(|extension| extension == "mp4")
             })
             .count();
         assert_eq!(segment_count, 2);
     }
 
     #[test]
-    fn writes_gif_segments_with_per_segment_latest_jpeg() {
+    fn writes_mp4_segments_with_per_segment_latest_jpeg() {
         let tmp = TempDir::new().expect("tmpdir");
         let backend = SequenceBackend::new(vec![Ok(vec![display("1", 64, 48)])]);
         let mut state = CaptureState::default();
@@ -477,7 +477,7 @@ mod tests {
         )
         .expect("capture tick");
 
-        let mut gif_files = WalkDir::new(tmp.path())
+        let mut mp4_files = WalkDir::new(tmp.path())
             .into_iter()
             .filter_map(Result::ok)
             .filter(|entry| {
@@ -485,22 +485,22 @@ mod tests {
                     && entry
                         .path()
                         .extension()
-                        .is_some_and(|extension| extension == "gif")
+                        .is_some_and(|extension| extension == "mp4")
             })
             .map(walkdir::DirEntry::into_path)
             .collect::<Vec<_>>();
-        gif_files.sort();
+        mp4_files.sort();
 
-        assert_eq!(gif_files.len(), 1);
-        assert_eq!(gif_files[0].parent(), Some(tmp.path()));
-        assert!(fs::metadata(&gif_files[0]).expect("segment metadata").len() > 0);
+        assert_eq!(mp4_files.len(), 1);
+        assert_eq!(mp4_files[0].parent(), Some(tmp.path()));
+        assert!(fs::metadata(&mp4_files[0]).expect("segment metadata").len() > 0);
 
-        let latest_frame_path = gif_files[0].with_file_name(format!(
+        let latest_frame_path = mp4_files[0].with_file_name(format!(
             "{}-latest.jpg",
-            gif_files[0]
+            mp4_files[0]
                 .file_stem()
                 .and_then(|name| name.to_str())
-                .expect("utf8 gif stem")
+                .expect("utf8 mp4 stem")
         ));
         assert!(latest_frame_path.exists());
         assert!(
@@ -533,7 +533,7 @@ mod tests {
                     && entry
                         .path()
                         .to_str()
-                        .is_some_and(|path| path.ends_with(".gif.json"))
+                        .is_some_and(|path| path.ends_with(".mp4.json"))
             })
             .expect("manifest")
             .into_path();
@@ -582,7 +582,7 @@ mod tests {
                     && entry
                         .path()
                         .extension()
-                        .is_some_and(|extension| extension == "gif")
+                        .is_some_and(|extension| extension == "mp4")
             })
             .map(|entry| entry.file_name().to_string_lossy().into_owned())
             .collect::<Vec<_>>();
@@ -591,8 +591,8 @@ mod tests {
         assert_eq!(
             segment_files,
             vec![
-                "2026-03-23T23-59-59Z-display-1.gif".to_string(),
-                "2026-03-24T00-00-01Z-display-1.gif".to_string(),
+                "2026-03-23T23-59-59Z-display-1.mp4".to_string(),
+                "2026-03-24T00-00-01Z-display-1.mp4".to_string(),
             ]
         );
     }
@@ -600,8 +600,8 @@ mod tests {
     #[test]
     fn prune_removes_old_segments() {
         let tmp = TempDir::new().expect("tmpdir");
-        let old_segment = tmp.path().join("2026-03-20T00-00-00Z-display-1.gif");
-        fs::write(&old_segment, b"fake gif").expect("create old segment");
+        let old_segment = tmp.path().join("2026-03-20T00-00-00Z-display-1.mp4");
+        fs::write(&old_segment, b"fake mp4").expect("create old segment");
         let old_manifest = old_segment.with_extension(MANIFEST_FILE_EXTENSION);
         write_manifest(
             &old_manifest,

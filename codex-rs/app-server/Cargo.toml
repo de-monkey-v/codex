@@ -52,7 +52,8 @@ codex-utils-json-to-toml = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 futures = { workspace = true }
-image = { workspace = true, features = ["gif", "jpeg"] }
+ffmpeg-next = "8.0"
+image = { workspace = true, features = ["jpeg"] }
 owo-colors = { workspace = true, features = ["supports-colors"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
