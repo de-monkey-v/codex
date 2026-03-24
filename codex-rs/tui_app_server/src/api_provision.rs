@@ -38,7 +38,7 @@ pub(crate) fn start_command(
         return Ok(existing_shell_api_key_message());
     }
 
-    let dotenv_path = cwd.join(".env");
+    let dotenv_path = cwd.join(".env.local");
     let start_hint = format!(
         "Codex will save {OPENAI_API_KEY_ENV_VAR} to {path} and hot-apply it here when allowed.",
         path = dotenv_path.display()
@@ -156,7 +156,7 @@ fn skip_reason_for_live_apply_message(message: &str) -> Option<String> {
 
     if message.starts_with("External auth is active.") {
         return Some(format!(
-            "Saved {OPENAI_API_KEY_ENV_VAR} to .env, but left this session unchanged because external auth is currently active here."
+            "Saved {OPENAI_API_KEY_ENV_VAR} to .env.local, but left this session unchanged because external auth is currently active here."
         ));
     }
 
@@ -165,7 +165,7 @@ fn skip_reason_for_live_apply_message(message: &str) -> Option<String> {
 
 fn chatgpt_required_message() -> String {
     format!(
-        "Saved {OPENAI_API_KEY_ENV_VAR} to .env, but left this session unchanged because ChatGPT login is required here."
+        "Saved {OPENAI_API_KEY_ENV_VAR} to .env.local, but left this session unchanged because ChatGPT login is required here."
     )
 }
 
@@ -231,13 +231,13 @@ mod tests {
                 project_api_key: "sk-proj-123".to_string(),
                 access_token: "oauth-access-123".to_string(),
             },
-            Path::new("/tmp/workspace/.env"),
+            Path::new("/tmp/workspace/.env.local"),
             LiveApplyOutcome::Applied,
         );
 
         assert_eq!(
             render_cell(&cell),
-            "• Provisioned an API key for Default Org / Default Project and saved OPENAI_API_KEY to /tmp/workspace/.env. Updated this session to use the newly provisioned API key without touching auth.json."
+            "• Provisioned an API key for Default Org / Default Project and saved OPENAI_API_KEY to /tmp/workspace/.env.local. Updated this session to use the newly provisioned API key without touching auth.json."
         );
     }
 
@@ -253,13 +253,13 @@ mod tests {
                 project_api_key: "sk-proj-123".to_string(),
                 access_token: "oauth-access-123".to_string(),
             },
-            Path::new("/tmp/workspace/.env"),
+            Path::new("/tmp/workspace/.env.local"),
             LiveApplyOutcome::Skipped(chatgpt_required_message()),
         );
 
         assert_eq!(
             render_cell(&cell),
-            "• Provisioned an API key for org-default / proj-default and saved OPENAI_API_KEY to /tmp/workspace/.env. Saved OPENAI_API_KEY to .env, but left this session unchanged because ChatGPT login is required here."
+            "• Provisioned an API key for org-default / proj-default and saved OPENAI_API_KEY to /tmp/workspace/.env.local. Saved OPENAI_API_KEY to .env.local, but left this session unchanged because ChatGPT login is required here."
         );
     }
 
@@ -286,7 +286,7 @@ mod tests {
                 "External auth is active. Use account/login/start (chatgptAuthTokens) to update it or account/logout to clear it."
             ),
             Some(
-                "Saved OPENAI_API_KEY to .env, but left this session unchanged because external auth is currently active here."
+                "Saved OPENAI_API_KEY to .env.local, but left this session unchanged because external auth is currently active here."
                     .to_string()
             )
         );
