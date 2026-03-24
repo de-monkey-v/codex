@@ -84,7 +84,9 @@ mod imp {
             };
 
             let mut muxer_options = Dictionary::new();
-            muxer_options.set("movflags", "frag_keyframe+empty_moov+default_base_moof");
+            // Emit a new fragmented MP4 fragment for each written frame so the active segment is
+            // readable without waiting for the next keyframe or segment rotation.
+            muxer_options.set("movflags", "frag_every_frame+empty_moov+default_base_moof");
             output
                 .write_header_with(muxer_options)
                 .map_err(std::io::Error::other)?;
