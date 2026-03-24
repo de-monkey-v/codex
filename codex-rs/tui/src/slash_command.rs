@@ -83,7 +83,7 @@ impl SlashCommand {
             // SlashCommand::Undo => "ask Codex to undo a turn",
             SlashCommand::Quit | SlashCommand::Exit => "exit Codex",
             SlashCommand::Diff => "show git diff (including untracked files)",
-            SlashCommand::ApiProvision => "provision an API key and save it to .env",
+            SlashCommand::ApiProvision => "provision an API key and save it to .env.local",
             SlashCommand::Copy => "copy the latest Codex output to your clipboard",
             SlashCommand::Mention => "mention a file",
             SlashCommand::Skills => "use skills to improve how Codex performs specific tasks",

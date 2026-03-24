@@ -36,7 +36,7 @@ pub(crate) fn start_command(
         return Ok(existing_shell_api_key_message());
     }
 
-    let dotenv_path = cwd.join(".env");
+    let dotenv_path = cwd.join(".env.local");
     let start_hint = format!(
         "Codex will save {OPENAI_API_KEY_ENV_VAR} to {path} and hot-apply it here when allowed.",
         path = dotenv_path.display()
@@ -129,7 +129,7 @@ fn live_apply_api_key(
 ) -> LiveApplyOutcome {
     if matches!(forced_login_method, Some(ForcedLoginMethod::Chatgpt)) {
         return LiveApplyOutcome::Skipped(format!(
-            "Saved {OPENAI_API_KEY_ENV_VAR} to .env, but left this session unchanged because ChatGPT login is required here."
+            "Saved {OPENAI_API_KEY_ENV_VAR} to .env.local, but left this session unchanged because ChatGPT login is required here."
         ));
     }
 
@@ -200,7 +200,7 @@ mod tests {
                 project_api_key: "sk-proj-123".to_string(),
                 access_token: "oauth-access-123".to_string(),
             },
-            Path::new("/tmp/workspace/.env"),
+            Path::new("/tmp/workspace/.env.local"),
             LiveApplyOutcome::Applied,
         );
 
@@ -219,9 +219,9 @@ mod tests {
                 project_api_key: "sk-proj-123".to_string(),
                 access_token: "oauth-access-123".to_string(),
             },
-            Path::new("/tmp/workspace/.env"),
+            Path::new("/tmp/workspace/.env.local"),
             LiveApplyOutcome::Skipped(
-                "Saved OPENAI_API_KEY to .env, but left this session unchanged because ChatGPT login is required here."
+                "Saved OPENAI_API_KEY to .env.local, but left this session unchanged because ChatGPT login is required here."
                     .to_string(),
             ),
         );
