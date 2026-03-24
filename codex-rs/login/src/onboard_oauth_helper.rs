@@ -18,8 +18,7 @@ use std::time::Duration;
 use base64::Engine;
 use codex_app_server_protocol::AuthMode;
 use codex_client::build_reqwest_client_with_custom_ca;
-use codex_core::auth::AuthDotJson;
-use codex_core::config::find_codex_home;
+use codex_utils_home_dir::find_codex_home;
 use rand::RngCore;
 use reqwest::Client;
 use reqwest::Method;
@@ -32,6 +31,8 @@ use tiny_http::Response;
 use tiny_http::Server;
 use tiny_http::StatusCode;
 use url::Url;
+
+use crate::auth::AuthDotJson;
 
 const AUTH_ISSUER: &str = "https://auth.openai.com";
 const PLATFORM_HYDRA_CLIENT_ID: &str = "app_2SKx67EdpoN0G6j64rFvigXD";

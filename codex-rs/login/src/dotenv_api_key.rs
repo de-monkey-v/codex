@@ -3,7 +3,7 @@ use std::io;
 use std::io::ErrorKind;
 use std::path::Path;
 
-use codex_core::auth::OPENAI_API_KEY_ENV_VAR;
+use crate::auth::OPENAI_API_KEY_ENV_VAR;
 
 pub fn validate_dotenv_target(path: &Path) -> io::Result<()> {
     ensure_parent_dir(path)?;
