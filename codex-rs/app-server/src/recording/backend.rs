@@ -4,7 +4,9 @@ use codex_app_server_protocol::ScreenRecordingPlatform;
 use image::Rgba;
 use image::RgbaImage;
 use std::sync::Arc;
+#[cfg(target_os = "macos")]
 use xcap::Monitor;
+#[cfg(target_os = "macos")]
 use xcap::XCapError;
 
 pub(crate) const FAKE_BACKEND_ENV_VAR: &str = "CODEX_SCREEN_RECORDING_FAKE";
@@ -75,12 +77,24 @@ pub(crate) fn default_capture_backend() -> Arc<dyn CaptureBackend> {
     if std::env::var_os(FAKE_BACKEND_ENV_VAR).is_some() {
         Arc::new(FakeCaptureBackend)
     } else {
-        Arc::new(XcapCaptureBackend)
+        platform_capture_backend()
     }
 }
 
+#[cfg(target_os = "macos")]
+fn platform_capture_backend() -> Arc<dyn CaptureBackend> {
+    Arc::new(XcapCaptureBackend)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn platform_capture_backend() -> Arc<dyn CaptureBackend> {
+    Arc::new(UnsupportedCaptureBackend)
+}
+
+#[cfg(target_os = "macos")]
 pub(crate) struct XcapCaptureBackend;
 
+#[cfg(target_os = "macos")]
 impl CaptureBackend for XcapCaptureBackend {
     fn kind(&self) -> ScreenRecordingBackend {
         ScreenRecordingBackend::Xcap
@@ -115,6 +129,26 @@ impl CaptureBackend for XcapCaptureBackend {
             });
         }
         Ok(displays)
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+struct UnsupportedCaptureBackend;
+
+#[cfg(not(target_os = "macos"))]
+impl CaptureBackend for UnsupportedCaptureBackend {
+    fn kind(&self) -> ScreenRecordingBackend {
+        ScreenRecordingBackend::Xcap
+    }
+
+    fn platform(&self) -> ScreenRecordingPlatform {
+        current_platform()
+    }
+
+    fn capture_displays(&self) -> Result<Vec<CapturedDisplay>, CaptureBackendFailure> {
+        Err(CaptureBackendFailure::unsupported(
+            "screen capture is currently supported only on macOS",
+        ))
     }
 }
 
@@ -165,6 +199,7 @@ fn current_platform() -> ScreenRecordingPlatform {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn map_xcap_error(error: XCapError) -> CaptureBackendFailure {
     match error {
         XCapError::NotSupported => {
@@ -202,5 +237,19 @@ mod tests {
         assert_eq!(displays[0].id, "fake-display-1");
         assert_eq!(displays[0].geometry.width, 64);
         assert_eq!(displays[0].geometry.height, 48);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn platform_backend_reports_macos_only_support() {
+        let backend = platform_capture_backend();
+        let err = backend
+            .capture_displays()
+            .expect_err("non-macOS backend should be unsupported");
+        assert_eq!(err.kind, CaptureBackendFailureKind::Unsupported);
+        assert_eq!(
+            err.message,
+            "screen capture is currently supported only on macOS"
+        );
     }
 }

@@ -186,6 +186,7 @@ Example with notification opt-out:
 - `recording/screen/pause` — pause an enabled screen recording service without changing persistent config (experimental). This rejects when `features.screen_recording` is off.
 - `recording/screen/resume` — resume a paused screen recording service without changing persistent config (experimental). This rejects when `features.screen_recording` is off.
 - `recording/screen/status/updated` — notification emitted when screen recording status changes, including changes caused by config writes, runtime pause/resume, permission failures, or display topology changes (experimental).
+- Screen capture is currently implemented only on macOS. Other platforms report screen recording as unsupported even when the feature is enabled.
 
 ### Example: Start or resume a thread
 

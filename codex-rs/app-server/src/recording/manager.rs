@@ -337,7 +337,7 @@ impl ScreenRecordingManager {
                 true
             }
             Err(std::fs::TryLockError::WouldBlock) => {
-                let owner_pid = read_owner_pid(&lock_file).ok();
+                let owner_pid = read_owner_pid(&self.inner.lock_path).ok();
                 let mut status = runtime.status.clone();
                 status.state = ScreenRecordingState::Error;
                 status.last_error = Some(match owner_pid {
@@ -629,16 +629,28 @@ fn write_owner_pid(mut lock_file: &File) -> std::io::Result<()> {
     lock_file.sync_all()
 }
 
-fn read_owner_pid(mut lock_file: &File) -> std::io::Result<u32> {
+fn read_owner_pid(lock_path: &Path) -> std::io::Result<u32> {
     let mut last_err = None;
     for _attempt in 0..5 {
+        let mut lock_file = match File::options().read(true).open(lock_path) {
+            Ok(lock_file) => lock_file,
+            Err(err) => {
+                last_err = Some(err);
+                std::thread::sleep(Duration::from_millis(20));
+                continue;
+            }
+        };
         lock_file.seek(SeekFrom::Start(0))?;
         let mut contents = String::new();
-        lock_file.read_to_string(&mut contents)?;
+        if let Err(err) = lock_file.read_to_string(&mut contents) {
+            last_err = Some(err);
+            std::thread::sleep(Duration::from_millis(20));
+            continue;
+        }
         match contents.trim().parse::<u32>() {
             Ok(pid) => return Ok(pid),
             Err(err) => {
-                last_err = Some(err);
+                last_err = Some(std::io::Error::new(ErrorKind::InvalidData, err));
                 std::thread::sleep(Duration::from_millis(20));
             }
         }
@@ -763,6 +775,24 @@ mod tests {
             );
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
+    }
+
+    #[test]
+    fn read_owner_pid_retries_until_pid_is_written() {
+        let temp_dir = TempDir::new().expect("tmpdir");
+        let lock_path = temp_dir.path().join("recording.lock");
+        File::create(&lock_path).expect("create lock file");
+        let expected_pid = 4242_u32;
+        let writer_path = lock_path.clone();
+        let writer = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(40));
+            std::fs::write(&writer_path, format!("{expected_pid}\n")).expect("write owner pid");
+        });
+
+        let pid = read_owner_pid(&lock_path).expect("read owner pid");
+
+        writer.join().expect("join writer");
+        assert_eq!(pid, expected_pid);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
