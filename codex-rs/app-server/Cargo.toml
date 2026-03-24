@@ -52,7 +52,6 @@ codex-utils-json-to-toml = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 futures = { workspace = true }
-ffmpeg-next = "8.0"
 image = { workspace = true, features = ["jpeg"] }
 owo-colors = { workspace = true, features = ["supports-colors"] }
 serde = { workspace = true, features = ["derive"] }
@@ -100,4 +99,5 @@ wiremock = { workspace = true }
 shlex = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+ffmpeg-next = "8.0"
 xcap = { workspace = true }

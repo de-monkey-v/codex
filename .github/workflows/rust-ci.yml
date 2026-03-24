@@ -148,6 +148,20 @@ jobs:
         run: |
           sudo DEBIAN_FRONTEND=noninteractive apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends pkg-config libcap-dev libclang-dev libdbus-1-dev libdrm-dev libegl-dev libgbm-dev libpipewire-0.3-dev libwayland-dev libxcb1-dev libxrandr-dev
+      - name: Install macOS recording build dependencies
+        if: ${{ runner.os == 'macOS' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HOMEBREW_NO_AUTO_UPDATE=1
+          for formula in pkgconf ffmpeg; do
+            if ! brew list "$formula" >/dev/null 2>&1; then
+              brew install "$formula"
+            fi
+          done
+          echo "DEVELOPER_DIR=$(xcode-select -p)" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG=$(brew --prefix pkgconf)/bin/pkgconf" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=$(brew --prefix ffmpeg)/lib/pkgconfig:$(brew --prefix)/lib/pkgconfig" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@1.93.0
         with:
           toolchain: nightly-2025-09-18
@@ -272,6 +286,20 @@ jobs:
             fi
             sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${packages[@]}"
           fi
+      - name: Install macOS recording build dependencies
+        if: ${{ runner.os == 'macOS' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HOMEBREW_NO_AUTO_UPDATE=1
+          for formula in pkgconf ffmpeg; do
+            if ! brew list "$formula" >/dev/null 2>&1; then
+              brew install "$formula"
+            fi
+          done
+          echo "DEVELOPER_DIR=$(xcode-select -p)" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG=$(brew --prefix pkgconf)/bin/pkgconf" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=$(brew --prefix ffmpeg)/lib/pkgconfig:$(brew --prefix)/lib/pkgconfig" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@1.93.0
         with:
           targets: ${{ matrix.target }}
@@ -609,6 +637,20 @@ jobs:
             sudo apt-get update -y
             sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends pkg-config libcap-dev libclang-dev libdbus-1-dev libdrm-dev libegl-dev libgbm-dev libpipewire-0.3-dev libwayland-dev libxcb1-dev libxrandr-dev
           fi
+      - name: Install macOS recording build dependencies
+        if: ${{ runner.os == 'macOS' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HOMEBREW_NO_AUTO_UPDATE=1
+          for formula in pkgconf ffmpeg; do
+            if ! brew list "$formula" >/dev/null 2>&1; then
+              brew install "$formula"
+            fi
+          done
+          echo "DEVELOPER_DIR=$(xcode-select -p)" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG=$(brew --prefix pkgconf)/bin/pkgconf" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=$(brew --prefix ffmpeg)/lib/pkgconfig:$(brew --prefix)/lib/pkgconfig" >> "$GITHUB_ENV"
 
       # Some integration tests rely on DotSlash being installed.
       # See https://github.com/openai/codex/pull/7617.

@@ -30,6 +30,14 @@ common --incompatible_strict_action_env
 # Not ideal, but We need to allow dotslash to be found
 common:linux --test_env=PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 common:macos --test_env=PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+common:macos --action_env=PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+common:macos --host_action_env=PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+common:macos --action_env=DEVELOPER_DIR
+common:macos --host_action_env=DEVELOPER_DIR
+common:macos --action_env=PKG_CONFIG
+common:macos --host_action_env=PKG_CONFIG
+common:macos --action_env=PKG_CONFIG_PATH
+common:macos --host_action_env=PKG_CONFIG_PATH
 
 # Pass through some env vars Windows needs to use powershell?
 common:windows --test_env=PATH
@@ -59,4 +67,3 @@ common:remote --jobs=800
 # TODO(team): Evaluate if this actually helps, zbarsky is not sure, everything seems bottlenecked on `core` either way.
 # Enable pipelined compilation since we are not bound by local CPU count.
 #common:remote --@rules_rust//rust/settings:pipelined_compilation
-
