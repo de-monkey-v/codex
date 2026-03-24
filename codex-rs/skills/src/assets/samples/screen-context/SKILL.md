@@ -19,10 +19,10 @@ $CODEX_HOME/recording/screen_ephemeral/
 
 ## Usage
 
-The most common workflow is to read the latest frame of the screen recording for a given display, which represents the user's most recent work. Copy it to a temp file when you want to do file operations on it, because otherwise the file will be silently updated by the screen recording service.
+The most common workflow is to read the latest frame of the screen recording for a given display, which represents the user's most recent work.
 
-When you need recent screen history instead of only the latest frame, search the OCR sidecars first. Use `rg` over `*.ocr.jsonl` to find relevant terms or timestamps, then inspect the matching `latest.jpg` or extracted frames from the segment if necessary for visual confirmation (note that the OCR is very noisy so you should double check by checking individual frames visually).
-
-Screen data should be used to get context on the user's work, but you must upgrade to other data sources (such as your app-specific skills, connectors, or the file system) as soon as you've gotten the minimum necessary context from the screenshot to do so. This is because your multimodal understanding is not that good, so you should avoid relying on it for complex tasks.
-
-For example, if the user asks you to "review the doc I have open", you should view the context, see that e.g. it's a Google Doc with a doc ID, extract the doc ID, and then use the Google Doc connector to review the doc. You must not try to OCR the entire document from the screenshot (also because the user's screen may not show the entire content of the document).
+- Copy it to a temp file when you want to do file operations on it, because otherwise the file will be silently updated by the screen recording service.
+- When you need recent screen history instead of only the latest frame, search the OCR sidecars first. Use `rg` over `*.ocr.jsonl` to find relevant terms or timestamps, then inspect the matching `latest.jpg` or extracted frames from the segment if necessary for visual confirmation.
+- You should ONLY use the OCR for greps to find relevant terms or timestamps, not for any other purpose (e.g. extracting document IDs to send to connectors). This is because the OCR is very noisy and not very accurate. Instead, extract text from the image yourself when you need to do something with the text.
+- Screen data should be used to get context on the user's work, but you must upgrade to other data sources (such as your app-specific skills, connectors, or the file system) as soon as you've gotten the minimum necessary context from the screen data to do so. This is because your multimodal understanding is not that good, so you should avoid relying on it for complex tasks.
+  - For example, if the user asks you to "review the doc I have open", you should view the context, see that e.g. it's a Google Doc with a doc ID, extract the doc ID, and then use the Google Doc connector to review the doc. You must not try to OCR the entire document from the screenshot (also because the user's screen may not show the entire content of the document).
