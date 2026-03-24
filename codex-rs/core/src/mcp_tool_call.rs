@@ -25,8 +25,10 @@ use crate::guardian::guardian_approval_request_to_json;
 use crate::guardian::review_approval_request;
 use crate::guardian::routes_approval_to_guardian;
 use crate::mcp::CODEX_APPS_MCP_SERVER_NAME;
+use crate::mcp_openai_file::declared_openai_file_input_param_names;
 use crate::mcp_tool_approval_templates::RenderedMcpToolApprovalParam;
 use crate::mcp_tool_approval_templates::render_mcp_tool_approval_template;
+use crate::openai_files::upload_local_file;
 use crate::protocol::EventMsg;
 use crate::protocol::McpInvocation;
 use crate::protocol::McpToolCallBeginEvent;
@@ -145,22 +147,18 @@ pub(crate) async fn handle_mcp_tool_call(
                 maybe_mark_thread_memory_mode_polluted(sess.as_ref(), turn_context.as_ref()).await;
 
                 let start = Instant::now();
-                let result = sess
-                    .call_tool(
-                        &server,
-                        &tool_name,
-                        arguments_value.clone(),
-                        request_meta.clone(),
-                    )
-                    .await
-                    .map_err(|e| format!("tool call error: {e:?}"));
-                let result = sanitize_mcp_tool_result_for_model(
-                    turn_context
-                        .model_info
-                        .input_modalities
-                        .contains(&InputModality::Image),
-                    result,
-                );
+                let result = execute_mcp_tool_call(
+                    sess.as_ref(),
+                    turn_context.as_ref(),
+                    McpToolExecutionInvocation {
+                        server: &server,
+                        tool_name: &tool_name,
+                        arguments_value: arguments_value.clone(),
+                        metadata: metadata.as_ref(),
+                        request_meta: request_meta.clone(),
+                    },
+                )
+                .await;
                 if let Err(e) = &result {
                     tracing::warn!("MCP tool call error: {e:?}");
                 }
@@ -235,18 +233,18 @@ pub(crate) async fn handle_mcp_tool_call(
     maybe_mark_thread_memory_mode_polluted(sess.as_ref(), turn_context.as_ref()).await;
 
     let start = Instant::now();
-    // Perform the tool call.
-    let result = sess
-        .call_tool(&server, &tool_name, arguments_value.clone(), request_meta)
-        .await
-        .map_err(|e| format!("tool call error: {e:?}"));
-    let result = sanitize_mcp_tool_result_for_model(
-        turn_context
-            .model_info
-            .input_modalities
-            .contains(&InputModality::Image),
-        result,
-    );
+    let result = execute_mcp_tool_call(
+        sess.as_ref(),
+        turn_context.as_ref(),
+        McpToolExecutionInvocation {
+            server: &server,
+            tool_name: &tool_name,
+            arguments_value: arguments_value.clone(),
+            metadata: metadata.as_ref(),
+            request_meta,
+        },
+    )
+    .await;
     if let Err(e) = &result {
         tracing::warn!("MCP tool call error: {e:?}");
     }
@@ -271,6 +269,46 @@ pub(crate) async fn handle_mcp_tool_call(
         .counter("codex.mcp.call", /*inc*/ 1, &[("status", status)]);
 
     CallToolResult::from_result(result)
+}
+
+async fn execute_mcp_tool_call(
+    sess: &Session,
+    turn_context: &TurnContext,
+    invocation: McpToolExecutionInvocation<'_>,
+) -> Result<CallToolResult, String> {
+    let rewritten_arguments = rewrite_mcp_tool_arguments_for_openai_files(
+        sess,
+        turn_context,
+        invocation.server,
+        invocation.tool_name,
+        invocation.arguments_value,
+        invocation.metadata,
+    )
+    .await?;
+    let result = sess
+        .call_tool(
+            invocation.server,
+            invocation.tool_name,
+            rewritten_arguments,
+            invocation.request_meta,
+        )
+        .await
+        .map_err(|e| format!("tool call error: {e:?}"))?;
+    sanitize_mcp_tool_result_for_model(
+        turn_context
+            .model_info
+            .input_modalities
+            .contains(&InputModality::Image),
+        Ok(result),
+    )
+}
+
+struct McpToolExecutionInvocation<'a> {
+    server: &'a str,
+    tool_name: &'a str,
+    arguments_value: Option<serde_json::Value>,
+    metadata: Option<&'a McpToolApprovalMetadata>,
+    request_meta: Option<serde_json::Value>,
 }
 
 async fn maybe_mark_thread_memory_mode_polluted(sess: &Session, turn_context: &TurnContext) {
@@ -386,6 +424,7 @@ pub(crate) struct McpToolApprovalMetadata {
     tool_title: Option<String>,
     tool_description: Option<String>,
     codex_apps_meta: Option<serde_json::Map<String, serde_json::Value>>,
+    openai_file_input_params: Option<Vec<String>>,
 }
 
 const MCP_TOOL_CODEX_APPS_META_KEY: &str = "_codex_apps";
@@ -791,10 +830,17 @@ pub(crate) async fn lookup_mcp_tool_metadata(
         .await
         .list_all_tools()
         .await;
-
     let tool_info = tools
         .into_values()
         .find(|tool_info| tool_info.server_name == server && tool_info.tool.name == tool_name)?;
+    mcp_tool_approval_metadata_from_tool_info(turn_context, server, tool_info).await
+}
+
+async fn mcp_tool_approval_metadata_from_tool_info(
+    turn_context: &TurnContext,
+    server: &str,
+    tool_info: crate::mcp_connection_manager::ToolInfo,
+) -> Option<McpToolApprovalMetadata> {
     let connector_description = if server == CODEX_APPS_MCP_SERVER_NAME {
         let connectors = match connectors::list_cached_accessible_connectors_from_mcp_tools(
             turn_context.config.as_ref(),
@@ -833,7 +879,136 @@ pub(crate) async fn lookup_mcp_tool_metadata(
             .and_then(|meta| meta.get(MCP_TOOL_CODEX_APPS_META_KEY))
             .and_then(serde_json::Value::as_object)
             .cloned(),
+        openai_file_input_params: Some(declared_openai_file_input_param_names(
+            tool_info.tool.meta.as_deref(),
+        ))
+        .filter(|params| !params.is_empty()),
     })
+}
+
+async fn rewrite_mcp_tool_arguments_for_openai_files(
+    sess: &Session,
+    turn_context: &TurnContext,
+    server: &str,
+    tool_name: &str,
+    arguments_value: Option<serde_json::Value>,
+    metadata: Option<&McpToolApprovalMetadata>,
+) -> Result<Option<serde_json::Value>, String> {
+    let Some(openai_file_input_params) =
+        metadata.and_then(|metadata| metadata.openai_file_input_params.as_ref())
+    else {
+        return Ok(arguments_value);
+    };
+
+    let Some(arguments_value) = arguments_value else {
+        return Ok(None);
+    };
+    let Some(arguments) = arguments_value.as_object() else {
+        return Ok(Some(arguments_value));
+    };
+    let auth = sess.services.auth_manager.auth().await;
+    let mut file_arguments = serde_json::Map::new();
+
+    for field_name in openai_file_input_params {
+        let Some(value) = arguments.get(field_name) else {
+            continue;
+        };
+        let Some(uploaded_value) =
+            rewrite_argument_value_for_openai_files(turn_context, auth.as_ref(), field_name, value)
+                .await?
+        else {
+            continue;
+        };
+        file_arguments.insert(field_name.clone(), uploaded_value);
+    }
+
+    if file_arguments.is_empty() {
+        return Ok(Some(arguments_value));
+    }
+
+    let rewritten_arguments = sess
+        .services
+        .mcp_connection_manager
+        .read()
+        .await
+        .rewrite_openai_file_arguments(
+            server,
+            &crate::mcp_connection_manager::OpenAiFileBridgeRequest {
+                tool_name: tool_name.to_string(),
+                arguments: arguments_value,
+                file_arguments,
+            },
+        )
+        .await
+        .map_err(|error| format!("failed to rewrite OpenAI file bridge arguments: {error}"))?;
+
+    Ok(Some(rewritten_arguments))
+}
+
+async fn rewrite_argument_value_for_openai_files(
+    turn_context: &TurnContext,
+    auth: Option<&crate::CodexAuth>,
+    field_name: &str,
+    value: &serde_json::Value,
+) -> Result<Option<serde_json::Value>, String> {
+    match value {
+        serde_json::Value::String(path_or_file_ref) => {
+            let rewritten = build_uploaded_local_argument_value(
+                turn_context,
+                auth,
+                field_name,
+                /*index*/ None,
+                path_or_file_ref,
+            )
+            .await?;
+            Ok(Some(rewritten))
+        }
+        serde_json::Value::Array(values) => {
+            let mut rewritten_values = Vec::with_capacity(values.len());
+            for (index, item) in values.iter().enumerate() {
+                let Some(path_or_file_ref) = item.as_str() else {
+                    return Ok(None);
+                };
+                let rewritten = build_uploaded_local_argument_value(
+                    turn_context,
+                    auth,
+                    field_name,
+                    Some(index),
+                    path_or_file_ref,
+                )
+                .await?;
+                rewritten_values.push(rewritten);
+            }
+            Ok(Some(serde_json::Value::Array(rewritten_values)))
+        }
+        _ => Ok(None),
+    }
+}
+
+async fn build_uploaded_local_argument_value(
+    turn_context: &TurnContext,
+    auth: Option<&crate::CodexAuth>,
+    field_name: &str,
+    index: Option<usize>,
+    file_path: &str,
+) -> Result<serde_json::Value, String> {
+    let resolved_path = turn_context.resolve_path(Some(file_path.to_string()));
+    let uploaded = upload_local_file(turn_context.config.as_ref(), auth, &resolved_path)
+        .await
+        .map_err(|error| match index {
+            Some(index) => {
+                format!("failed to upload `{file_path}` for `{field_name}[{index}]`: {error}")
+            }
+            None => format!("failed to upload `{file_path}` for `{field_name}`: {error}"),
+        })?;
+    Ok(serde_json::json!({
+        "downloadUrl": uploaded.download_url,
+        "fileId": uploaded.file_id,
+        "mimeType": uploaded.mime_type,
+        "fileName": uploaded.file_name,
+        "uri": uploaded.uri,
+        "fileSizeBytes": uploaded.file_size_bytes,
+    }))
 }
 
 async fn lookup_mcp_app_usage_metadata(

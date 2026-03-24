@@ -418,6 +418,20 @@ impl ManagedClient {
             .await?;
         Ok(())
     }
+
+    async fn rewrite_openai_file_arguments(
+        &self,
+        request: &OpenAiFileBridgeRequest,
+    ) -> Result<serde_json::Value> {
+        let response = self
+            .client
+            .send_custom_request(
+                MCP_OPENAI_FILE_BRIDGE_METHOD,
+                Some(serde_json::to_value(request)?),
+            )
+            .await?;
+        parse_openai_file_bridge_response(response)
+    }
 }
 
 #[derive(Clone)]
@@ -579,10 +593,51 @@ impl AsyncManagedClient {
 }
 
 pub const MCP_SANDBOX_STATE_CAPABILITY: &str = "codex/sandbox-state";
+pub const MCP_OPENAI_FILE_BRIDGE_METHOD: &str = "openai/file-bridge";
+
+fn server_supports_experimental_capability(
+    initialize_result: &rmcp::model::InitializeResult,
+    capability: &str,
+) -> bool {
+    initialize_result
+        .capabilities
+        .experimental
+        .as_ref()
+        .and_then(|experimental| experimental.get(capability))
+        .is_some()
+}
 
 /// Custom MCP request to push sandbox state updates.
 /// When used, the `params` field of the notification is [`SandboxState`].
 pub const MCP_SANDBOX_STATE_METHOD: &str = "codex/sandbox-state/update";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenAiFileBridgeRequest {
+    pub tool_name: String,
+    pub arguments: serde_json::Value,
+    pub file_arguments: serde_json::Map<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct OpenAiFileBridgeResponse {
+    arguments: serde_json::Value,
+}
+
+fn parse_openai_file_bridge_response(
+    response: rmcp::model::ServerResult,
+) -> Result<serde_json::Value> {
+    let rmcp::model::ServerResult::CustomResult(result) = response else {
+        return Err(anyhow!(
+            "expected custom result from `{MCP_OPENAI_FILE_BRIDGE_METHOD}` request"
+        ));
+    };
+    let response: OpenAiFileBridgeResponse = result
+        .result_as()
+        .context("failed to decode OpenAI file bridge response")?;
+    Ok(response.arguments)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1046,6 +1101,23 @@ impl McpConnectionManager {
         })
     }
 
+    pub async fn rewrite_openai_file_arguments(
+        &self,
+        server: &str,
+        request: &OpenAiFileBridgeRequest,
+    ) -> Result<serde_json::Value> {
+        let client = self.client_by_name(server).await?;
+        client
+            .rewrite_openai_file_arguments(request)
+            .await
+            .with_context(|| {
+                format!(
+                    "OpenAI file bridge argument rewrite failed for `{server}/{}`",
+                    request.tool_name
+                )
+            })
+    }
+
     /// List resources from the specified server.
     pub async fn list_resources(
         &self,
@@ -1374,6 +1446,8 @@ async fn start_server_task(
         .await
         .map_err(StartupOutcomeError::from)?;
 
+    let server_supports_sandbox_state_capability =
+        server_supports_experimental_capability(&initialize_result, MCP_SANDBOX_STATE_CAPABILITY);
     let list_start = Instant::now();
     let fetch_start = Instant::now();
     let tools = list_tools_for_client_uncached(&server_name, &client, startup_timeout)
@@ -1398,12 +1472,6 @@ async fn start_server_task(
     }
     let tools = filter_tools(tools, &tool_filter);
 
-    let server_supports_sandbox_state_capability = initialize_result
-        .capabilities
-        .experimental
-        .as_ref()
-        .and_then(|exp| exp.get(MCP_SANDBOX_STATE_CAPABILITY))
-        .is_some();
     let managed = ManagedClient {
         client: Arc::clone(&client),
         tools,
