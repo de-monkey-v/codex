@@ -8,6 +8,7 @@ use crate::config_loader::ConfigLayerStack;
 use crate::config_loader::ConfigRequirements;
 use crate::config_loader::ConfigRequirementsToml;
 use codex_config::CONFIG_TOML_FILE;
+use codex_features::Feature;
 use codex_protocol::config_types::TrustLevel;
 use codex_protocol::models::FileSystemPermissions;
 use codex_protocol::models::MacOsAutomationPermission;
@@ -483,6 +484,7 @@ policy:
         outcome.skills[0].policy,
         Some(SkillPolicy {
             allow_implicit_invocation: Some(false),
+            required_features: vec![],
             products: vec![],
         })
     );
@@ -515,6 +517,7 @@ policy: {}
         outcome.skills[0].policy,
         Some(SkillPolicy {
             allow_implicit_invocation: None,
+            required_features: vec![],
             products: vec![],
         })
     );
@@ -554,7 +557,42 @@ policy:
         outcome.skills[0].policy,
         Some(SkillPolicy {
             allow_implicit_invocation: None,
+            required_features: vec![],
             products: vec![Product::Codex, Product::Chatgpt, Product::Atlas],
+        })
+    );
+}
+
+#[tokio::test]
+async fn loads_skill_policy_required_features_from_yaml() {
+    let codex_home = tempfile::tempdir().expect("tempdir");
+    let skill_path = write_skill(&codex_home, "demo", "policy-features", "from yaml");
+    let skill_dir = skill_path.parent().expect("skill dir");
+
+    write_skill_metadata_at(
+        skill_dir,
+        r#"
+policy:
+  required_features:
+    - screen_recording
+"#,
+    );
+
+    let cfg = make_config(&codex_home).await;
+    let outcome = load_skills_for_test(&cfg);
+
+    assert!(
+        outcome.errors.is_empty(),
+        "unexpected errors: {:?}",
+        outcome.errors
+    );
+    assert_eq!(outcome.skills.len(), 1);
+    assert_eq!(
+        outcome.skills[0].policy,
+        Some(SkillPolicy {
+            allow_implicit_invocation: None,
+            required_features: vec![Feature::ScreenRecording],
+            products: vec![],
         })
     );
 }

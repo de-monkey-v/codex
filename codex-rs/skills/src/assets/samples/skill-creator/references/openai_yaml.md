@@ -23,6 +23,8 @@ dependencies:
 
 policy:
   allow_implicit_invocation: true
+  required_features:
+    - "screen_recording"
 ```
 
 ## Field descriptions and constraints
@@ -47,3 +49,5 @@ Top-level constraints:
 - `policy.allow_implicit_invocation`: When false, the skill is not injected into
   the model context by default, but can still be invoked explicitly via `$skill`.
   Defaults to true.
+- `policy.required_features`: Optional list of canonical feature keys that must be
+  enabled for the skill to load at all. Non-canonical or unknown feature keys are ignored.

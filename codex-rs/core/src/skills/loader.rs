@@ -14,6 +14,8 @@ use crate::skills::model::SkillPolicy;
 use crate::skills::model::SkillToolDependency;
 use crate::skills::system::system_cache_root_dir;
 use codex_app_server_protocol::ConfigLayerSource;
+use codex_features::canonical_feature_for_key;
+use codex_features::feature_for_key;
 use codex_protocol::models::FileSystemPermissions;
 use codex_protocol::models::MacOsSeatbeltProfileExtensions;
 use codex_protocol::models::NetworkPermissions;
@@ -115,6 +117,8 @@ struct Dependencies {
 struct Policy {
     #[serde(default)]
     allow_implicit_invocation: Option<bool>,
+    #[serde(default)]
+    required_features: Vec<String>,
     #[serde(default)]
     products: Vec<Product>,
 }
@@ -738,6 +742,28 @@ fn resolve_dependencies(dependencies: Option<Dependencies>) -> Option<SkillDepen
 fn resolve_policy(policy: Option<Policy>) -> Option<SkillPolicy> {
     policy.map(|policy| SkillPolicy {
         allow_implicit_invocation: policy.allow_implicit_invocation,
+        required_features: policy
+            .required_features
+            .into_iter()
+            .filter_map(|key| match canonical_feature_for_key(&key) {
+                Some(feature) => Some(feature),
+                None => match feature_for_key(&key) {
+                    Some(feature) => {
+                        tracing::warn!(
+                            "ignoring policy.required_features entry `{key}`: use canonical feature key `{}`",
+                            feature.key()
+                        );
+                        None
+                    }
+                    None => {
+                        tracing::warn!(
+                            "ignoring policy.required_features entry `{key}`: unknown feature key"
+                        );
+                        None
+                    }
+                },
+            })
+            .collect(),
         products: policy.products,
     })
 }

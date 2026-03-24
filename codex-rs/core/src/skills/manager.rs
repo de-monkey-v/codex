@@ -5,6 +5,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::RwLock;
 
+use codex_features::Feature;
+use codex_features::Features;
 use codex_protocol::protocol::Product;
 use codex_protocol::protocol::SkillScope;
 use codex_utils_absolute_path::AbsolutePathBuf;
@@ -83,12 +85,12 @@ impl SkillsManager {
     pub fn skills_for_config(&self, config: &Config) -> SkillLoadOutcome {
         let roots = self.skill_roots_for_config(config);
         let skill_config_rules = skill_config_rules_from_stack(&config.config_layer_stack);
-        let cache_key = config_skills_cache_key(&roots, &skill_config_rules);
+        let cache_key = config_skills_cache_key(&roots, &skill_config_rules, &config.features);
         if let Some(outcome) = self.cached_outcome_for_config(&cache_key) {
             return outcome;
         }
 
-        let outcome = self.build_skill_outcome(roots, &skill_config_rules);
+        let outcome = self.build_skill_outcome(roots, &skill_config_rules, &config.features);
         let mut cache = self
             .cache_by_config
             .write()
@@ -192,7 +194,7 @@ impl SkillsManager {
                 }),
         );
         let skill_config_rules = skill_config_rules_from_stack(&config_layer_stack);
-        let outcome = self.build_skill_outcome(roots, &skill_config_rules);
+        let outcome = self.build_skill_outcome(roots, &skill_config_rules, &config.features);
         let mut cache = self
             .cache_by_cwd
             .write()
@@ -205,11 +207,15 @@ impl SkillsManager {
         &self,
         roots: Vec<SkillRoot>,
         skill_config_rules: &SkillConfigRules,
+        features: &Features,
     ) -> SkillLoadOutcome {
-        let outcome = crate::skills::filter_skill_load_outcome_for_product(
+        let mut outcome = crate::skills::filter_skill_load_outcome_for_product(
             load_skills_from_roots(roots),
             self.restriction_product,
         );
+        outcome
+            .skills
+            .retain(|skill| skill.matches_required_features(features));
         let disabled_paths = resolve_disabled_skill_paths(&outcome.skills, skill_config_rules);
         finalize_skill_outcome(outcome, disabled_paths)
     }
@@ -259,6 +265,7 @@ impl SkillsManager {
 struct ConfigSkillsCacheKey {
     roots: Vec<(PathBuf, u8)>,
     skill_config_rules: SkillConfigRules,
+    enabled_features: Vec<Feature>,
 }
 
 pub(crate) fn bundled_skills_enabled_from_stack(
@@ -286,7 +293,10 @@ pub(crate) fn bundled_skills_enabled_from_stack(
 fn config_skills_cache_key(
     roots: &[SkillRoot],
     skill_config_rules: &SkillConfigRules,
+    features: &Features,
 ) -> ConfigSkillsCacheKey {
+    let mut enabled_features = features.enabled_features();
+    enabled_features.sort_unstable();
     ConfigSkillsCacheKey {
         roots: roots
             .iter()
@@ -301,6 +311,7 @@ fn config_skills_cache_key(
             })
             .collect(),
         skill_config_rules: skill_config_rules.clone(),
+        enabled_features,
     }
 }
 

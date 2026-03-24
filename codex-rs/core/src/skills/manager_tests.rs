@@ -1,6 +1,7 @@
 use super::*;
 use crate::config::ConfigBuilder;
 use crate::config::ConfigOverrides;
+use crate::config::ConfigToml;
 use crate::config_loader::ConfigLayerEntry;
 use crate::config_loader::ConfigLayerStack;
 use crate::config_loader::ConfigRequirementsToml;
@@ -49,6 +50,12 @@ fn write_plugin_skill(
     skill_path
 }
 
+fn write_skill_metadata_at(skill_dir: &std::path::Path, contents: &str) {
+    let metadata_dir = skill_dir.join("agents");
+    fs::create_dir_all(&metadata_dir).expect("create metadata dir");
+    fs::write(metadata_dir.join("openai.yaml"), contents).expect("write skill metadata");
+}
+
 fn test_skill(name: &str, path: PathBuf) -> SkillMetadata {
     SkillMetadata {
         name: name.to_string(),
@@ -62,6 +69,81 @@ fn test_skill(name: &str, path: PathBuf) -> SkillMetadata {
         path_to_skills_md: path,
         scope: SkillScope::User,
     }
+}
+
+#[tokio::test]
+async fn skills_for_config_filters_skills_by_required_features() {
+    let codex_home = tempfile::tempdir().expect("tempdir");
+    let cwd = tempfile::tempdir().expect("tempdir");
+
+    write_user_skill(
+        &codex_home,
+        "screen-recording-context",
+        "screen_recording_context",
+        "summarize screen recording context",
+    );
+    write_skill_metadata_at(
+        &codex_home.path().join("skills/screen-recording-context"),
+        r#"
+policy:
+  required_features:
+    - screen_recording
+"#,
+    );
+
+    let config_without_feature = ConfigBuilder::default()
+        .codex_home(codex_home.path().to_path_buf())
+        .harness_overrides(ConfigOverrides {
+            cwd: Some(cwd.path().to_path_buf()),
+            ..Default::default()
+        })
+        .build()
+        .await
+        .expect("defaults for test should always succeed");
+
+    fs::write(
+        codex_home.path().join(crate::config::CONFIG_TOML_FILE),
+        toml::to_string(&ConfigToml {
+            features: Some(codex_features::FeaturesToml {
+                entries: std::collections::BTreeMap::from([("screen_recording".to_string(), true)]),
+            }),
+            ..Default::default()
+        })
+        .expect("serialize config"),
+    )
+    .expect("write config");
+    let config_with_feature = ConfigBuilder::default()
+        .codex_home(codex_home.path().to_path_buf())
+        .harness_overrides(ConfigOverrides {
+            cwd: Some(cwd.path().to_path_buf()),
+            ..Default::default()
+        })
+        .build()
+        .await
+        .expect("config with feature should load");
+
+    let plugins_manager = Arc::new(PluginsManager::new(codex_home.path().to_path_buf()));
+    let skills_manager = SkillsManager::new(
+        codex_home.path().to_path_buf(),
+        plugins_manager,
+        config_with_feature.bundled_skills_enabled(),
+    );
+
+    let outcome_without_feature = skills_manager.skills_for_config(&config_without_feature);
+    assert!(
+        outcome_without_feature
+            .skills
+            .iter()
+            .all(|skill| skill.name != "screen_recording_context")
+    );
+
+    let outcome_with_feature = skills_manager.skills_for_config(&config_with_feature);
+    assert!(
+        outcome_with_feature
+            .skills
+            .iter()
+            .any(|skill| skill.name == "screen_recording_context")
+    );
 }
 
 #[test]

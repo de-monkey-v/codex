@@ -1,0 +1,3 @@
+policy:
+  required_features:
+    - "screen_recording"

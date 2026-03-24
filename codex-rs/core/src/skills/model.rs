@@ -3,6 +3,8 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use codex_features::Feature;
+use codex_features::Features;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::protocol::Product;
 use codex_protocol::protocol::SkillScope;
@@ -57,11 +59,21 @@ impl SkillMetadata {
             None => true,
         }
     }
+
+    pub fn matches_required_features(&self, features: &Features) -> bool {
+        self.policy.as_ref().is_none_or(|policy| {
+            policy
+                .required_features
+                .iter()
+                .all(|feature| features.enabled(*feature))
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SkillPolicy {
     pub allow_implicit_invocation: Option<bool>,
+    pub required_features: Vec<Feature>,
     // TODO: Enforce product gating in Codex skill selection/injection instead of only parsing and
     // storing this metadata.
     pub products: Vec<Product>,
