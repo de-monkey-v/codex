@@ -100,4 +100,14 @@ shlex = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 ffmpeg-next = "8.0"
+objc2 = "0.6.4"
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["CFData"] }
+objc2-core-graphics = { version = "0.3.2", default-features = false, features = [
+    "CGColorSpace",
+    "CGDataProvider",
+    "CGImage",
+    "objc2",
+] }
+objc2-foundation = "0.3.2"
+objc2-vision = "0.3.2"
 xcap = { workspace = true }

@@ -13,12 +13,15 @@ This skill allows you to view the user's screen. This skill is enabled because t
 $CODEX_HOME/recording/screen_ephemeral/
  ├── <utc_timestamp>-display-<display_id>-latest.jpg - latest frame for this segment + display
  ├── <utc_timestamp>-display-<display_id>.mp4 - mp4 file of the screen recording for this display (1 fps)
- └── <utc_timestamp>-display-<display_id>.mp4.json - metadata for this segment, contains the timestamp of the segment and the display ID but not any app information.
+ ├── <utc_timestamp>-display-<display_id>.mp4.json - metadata for this segment, contains the timestamp of the segment and the display ID but not any app information.
+ └── <utc_timestamp>-display-<display_id>.ocr.jsonl - append-only OCR history for the segment (created using Apple Vision OCR), one JSON object per material text change
 ```
 
 ## Usage
 
 The most common workflow is to read the latest frame of the screen recording for a given display, which represents the user's most recent work. Copy it to a temp file when you want to do file operations on it, because otherwise the file will be silently updated by the screen recording service.
+
+When you need recent screen history instead of only the latest frame, search the OCR sidecars first. Use `rg` over `*.ocr.jsonl` to find relevant terms or timestamps, then inspect the matching `latest.jpg` or extracted frames from the segment if necessary for visual confirmation (note that the OCR is very noisy so you should double check by checking individual frames visually).
 
 Screen data should be used to get context on the user's work, but you must upgrade to other data sources (such as your app-specific skills, connectors, or the file system) as soon as you've gotten the minimum necessary context from the screenshot to do so. This is because your multimodal understanding is not that good, so you should avoid relying on it for complex tasks.
 

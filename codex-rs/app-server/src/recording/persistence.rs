@@ -3,6 +3,9 @@ use super::backend::CaptureBackendFailure;
 use super::backend::CapturedDisplay;
 use super::backend::DisplayGeometry;
 use super::encoder::FfmpegSegmentEncoder;
+use super::ocr::OcrBackend;
+use super::ocr::OcrFrameResult;
+use super::ocr::OcrInput;
 use chrono::DateTime;
 use chrono::Utc;
 use image::ColorType;
@@ -14,6 +17,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fs;
 use std::fs::File;
+use std::fs::OpenOptions;
 use std::io::BufWriter;
 use std::io::Write;
 use std::path::Path;
@@ -25,7 +29,10 @@ pub(crate) const RETENTION_HOURS: u32 = 6;
 pub(crate) const RETENTION_SECONDS: i64 = 6 * 60 * 60;
 pub(crate) const SEGMENT_LENGTH_SECONDS: i64 = 30 * 60;
 pub(crate) const DISPLAY_REMOVAL_MISSED_TICKS: u32 = 3;
+const OCR_INTERVAL_SECONDS: u64 = 1;
+const OCR_FRAME_INTERVAL: u64 = CAPTURE_FPS as u64 * OCR_INTERVAL_SECONDS;
 const MANIFEST_FILE_EXTENSION: &str = "mp4.json";
+const OCR_FILE_EXTENSION: &str = "ocr.jsonl";
 
 #[derive(Default)]
 pub(crate) struct CaptureState {
@@ -48,8 +55,12 @@ struct DisplayStream {
 
 struct SegmentState {
     manifest_path: PathBuf,
-    latest_frame_path: PathBuf,
+    _latest_frame_path: PathBuf,
+    ocr_path: PathBuf,
     bucket_start_at: i64,
+    segment_started_at: i64,
+    frame_index: u64,
+    last_ocr_text: Option<String>,
     encoder: FfmpegSegmentEncoder,
 }
 
@@ -77,10 +88,21 @@ struct SegmentManifest {
     newest_frame_at: Option<i64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct OcrFrameRecord {
+    version: u32,
+    display_id: String,
+    segment_started_at: i64,
+    captured_at: i64,
+    frame_index: u64,
+    full_text: String,
+}
+
 pub(crate) fn capture_tick(
     storage_root: &Path,
     state: &mut CaptureState,
     backend: &dyn CaptureBackend,
+    ocr_backend: &dyn OcrBackend,
     captured_at: DateTime<Utc>,
 ) -> Result<CaptureTickOutcome, CaptureBackendFailure> {
     let displays = backend.capture_displays()?;
@@ -93,7 +115,7 @@ pub(crate) fn capture_tick(
     for display in displays {
         let stream = upsert_display_stream(storage_root, state, &display, captured_at)
             .map_err(|err| CaptureBackendFailure::other(err.to_string()))?;
-        write_frame(storage_root, stream, &display, captured_at)
+        write_frame(storage_root, stream, &display, ocr_backend, captured_at)
             .map_err(|err| CaptureBackendFailure::other(err.to_string()))?;
         newest_frame_at = Some(
             newest_frame_at
@@ -162,6 +184,8 @@ pub(crate) fn prune_old_segments(
         if newest_frame_at < cutoff {
             if let Some(segment_path) = segment_path_for_manifest(&manifest_path) {
                 let _ = fs::remove_file(segment_path);
+                let _ = fs::remove_file(latest_frame_path_for_segment(&manifest_path));
+                let _ = fs::remove_file(ocr_path_for_segment(&manifest_path));
             }
             let _ = fs::remove_file(&manifest_path);
         }
@@ -268,8 +292,12 @@ fn open_segment(
         FfmpegSegmentEncoder::open(&segment_path, encoded_width, encoded_height, CAPTURE_FPS)?;
     Ok(SegmentState {
         manifest_path,
-        latest_frame_path: storage_root.join(format!("{segment_name}-latest.jpg")),
+        _latest_frame_path: storage_root.join(format!("{segment_name}-latest.jpg")),
+        ocr_path: storage_root.join(format!("{segment_name}.{OCR_FILE_EXTENSION}")),
         bucket_start_at,
+        segment_started_at: captured_at.timestamp(),
+        frame_index: 0,
+        last_ocr_text: None,
         encoder,
     })
 }
@@ -278,22 +306,28 @@ fn write_frame(
     _storage_root: &Path,
     stream: &mut DisplayStream,
     display: &CapturedDisplay,
+    ocr_backend: &dyn OcrBackend,
     captured_at: DateTime<Utc>,
 ) -> std::io::Result<()> {
     stream
         .segment
         .encoder
         .write_rgba_frame(display.frame.as_raw())?;
-    write_latest_frame(&stream.segment.latest_frame_path, display)?;
+    // Temporarily disable latest-frame JPEG generation; it currently dominates
+    // the recorder CPU profile on high-resolution displays.
+    // write_latest_frame(&stream.segment.latest_frame_path, display)?;
+    maybe_write_ocr_frame(stream, display, ocr_backend, captured_at)?;
+    stream.segment.frame_index = stream.segment.frame_index.saturating_add(1);
 
     let manifest_bytes = fs::read(&stream.segment.manifest_path)?;
     let mut manifest: SegmentManifest =
         serde_json::from_slice(&manifest_bytes).map_err(std::io::Error::other)?;
-    manifest.frame_count = manifest.frame_count.saturating_add(1);
+    manifest.frame_count = stream.segment.frame_index;
     manifest.newest_frame_at = Some(captured_at.timestamp());
     write_manifest(&stream.segment.manifest_path, &manifest)
 }
 
+#[allow(dead_code)]
 fn write_latest_frame(frame_path: &Path, display: &CapturedDisplay) -> std::io::Result<()> {
     let temp_path = frame_path.with_extension("jpg.tmp");
     let file = File::create(&temp_path)?;
@@ -324,9 +358,88 @@ fn write_manifest(manifest_path: &Path, manifest: &SegmentManifest) -> std::io::
     fs::write(manifest_path, bytes)
 }
 
+fn maybe_write_ocr_frame(
+    stream: &mut DisplayStream,
+    display: &CapturedDisplay,
+    ocr_backend: &dyn OcrBackend,
+    captured_at: DateTime<Utc>,
+) -> std::io::Result<()> {
+    if stream.segment.frame_index % OCR_FRAME_INTERVAL != 0 {
+        return Ok(());
+    }
+    let Some(ocr_result) = ocr_backend.recognize(OcrInput {
+        frame: &display.frame,
+    })?
+    else {
+        return Ok(());
+    };
+    let normalized_text = normalize_ocr_text(&ocr_result);
+    if normalized_text.is_empty()
+        || stream
+            .segment
+            .last_ocr_text
+            .as_ref()
+            .is_some_and(|last_ocr_text| last_ocr_text == &normalized_text)
+    {
+        return Ok(());
+    }
+
+    let record = OcrFrameRecord {
+        version: 1,
+        display_id: display.id.clone(),
+        segment_started_at: stream.segment.segment_started_at,
+        captured_at: captured_at.timestamp(),
+        frame_index: stream.segment.frame_index,
+        full_text: normalized_text.clone(),
+    };
+    append_ocr_record(&stream.segment.ocr_path, &record)?;
+    stream.segment.last_ocr_text = Some(normalized_text);
+    Ok(())
+}
+
+fn normalize_ocr_text(result: &OcrFrameResult) -> String {
+    result
+        .full_text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn append_ocr_record(ocr_path: &Path, record: &OcrFrameRecord) -> std::io::Result<()> {
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(ocr_path)?;
+    let mut writer = BufWriter::new(file);
+    serde_json::to_writer(&mut writer, record).map_err(std::io::Error::other)?;
+    writer.write_all(b"\n")?;
+    writer.flush()?;
+    writer.get_ref().sync_all()
+}
+
 fn segment_path_for_manifest(manifest_path: &Path) -> Option<PathBuf> {
     let path = manifest_path.to_str()?;
     Some(PathBuf::from(path.strip_suffix(".json")?))
+}
+
+fn latest_frame_path_for_segment(manifest_path: &Path) -> PathBuf {
+    let segment_path = segment_path_for_manifest(manifest_path)
+        .expect("manifest path should always have a matching segment path");
+    segment_path.with_file_name(format!(
+        "{}-latest.jpg",
+        segment_path
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .expect("segment path should have a valid utf8 stem")
+    ))
+}
+
+fn ocr_path_for_segment(manifest_path: &Path) -> PathBuf {
+    let segment_path = segment_path_for_manifest(manifest_path)
+        .expect("manifest path should always have a matching segment path");
+    segment_path.with_extension(OCR_FILE_EXTENSION)
 }
 
 fn bucket_start_at(captured_at: DateTime<Utc>) -> i64 {
@@ -338,6 +451,10 @@ fn bucket_start_at(captured_at: DateTime<Utc>) -> i64 {
 mod tests {
     use super::*;
     use crate::recording::backend::CaptureBackendFailureKind;
+    use crate::recording::ocr::NoopOcrBackend;
+    use crate::recording::ocr::OcrBackend;
+    use crate::recording::ocr::OcrFrameResult;
+    use crate::recording::ocr::OcrInput;
     use image::Rgba;
     use image::RgbaImage;
     use pretty_assertions::assert_eq;
@@ -366,6 +483,24 @@ mod tests {
 
         fn capture_displays(&self) -> Result<Vec<CapturedDisplay>, CaptureBackendFailure> {
             self.frames.lock().expect("sequence lock").remove(0)
+        }
+    }
+
+    struct SequenceOcrBackend {
+        results: std::sync::Mutex<Vec<std::io::Result<Option<OcrFrameResult>>>>,
+    }
+
+    impl SequenceOcrBackend {
+        fn new(results: Vec<std::io::Result<Option<OcrFrameResult>>>) -> Self {
+            Self {
+                results: std::sync::Mutex::new(results),
+            }
+        }
+    }
+
+    impl OcrBackend for SequenceOcrBackend {
+        fn recognize(&self, _input: OcrInput<'_>) -> std::io::Result<Option<OcrFrameResult>> {
+            self.results.lock().expect("ocr lock").remove(0)
         }
     }
 
@@ -416,6 +551,7 @@ mod tests {
                 tmp.path(),
                 &mut state,
                 &backend,
+                &NoopOcrBackend,
                 DateTime::from_timestamp(1_700_000_000 + second, 0).expect("timestamp"),
             )
             .expect("capture tick");
@@ -438,6 +574,7 @@ mod tests {
             tmp.path(),
             &mut state,
             &backend,
+            &NoopOcrBackend,
             DateTime::from_timestamp(1_700_000_000, 0).expect("timestamp"),
         )
         .expect("first capture");
@@ -445,6 +582,7 @@ mod tests {
             tmp.path(),
             &mut state,
             &backend,
+            &NoopOcrBackend,
             DateTime::from_timestamp(1_700_000_001, 0).expect("timestamp"),
         )
         .expect("second capture");
@@ -464,7 +602,7 @@ mod tests {
     }
 
     #[test]
-    fn writes_mp4_segments_with_per_segment_latest_jpeg() {
+    fn writes_mp4_segments_without_latest_jpeg_sidecar() {
         let tmp = TempDir::new().expect("tmpdir");
         let backend = SequenceBackend::new(vec![Ok(vec![display("1", 64, 48)])]);
         let mut state = CaptureState::default();
@@ -473,6 +611,7 @@ mod tests {
             tmp.path(),
             &mut state,
             &backend,
+            &NoopOcrBackend,
             DateTime::from_timestamp(1_700_000_000, 0).expect("timestamp"),
         )
         .expect("capture tick");
@@ -502,13 +641,7 @@ mod tests {
                 .and_then(|name| name.to_str())
                 .expect("utf8 mp4 stem")
         ));
-        assert!(latest_frame_path.exists());
-        assert!(
-            fs::metadata(&latest_frame_path)
-                .expect("latest frame metadata")
-                .len()
-                > 0
-        );
+        assert!(!latest_frame_path.exists());
     }
 
     #[test]
@@ -521,6 +654,7 @@ mod tests {
             tmp.path(),
             &mut state,
             &backend,
+            &NoopOcrBackend,
             DateTime::from_timestamp(1_700_000_000, 0).expect("timestamp"),
         )
         .expect("capture tick");
@@ -559,6 +693,7 @@ mod tests {
             tmp.path(),
             &mut state,
             &backend,
+            &NoopOcrBackend,
             DateTime::parse_from_rfc3339("2026-03-23T23:59:59Z")
                 .expect("parse")
                 .with_timezone(&Utc),
@@ -568,6 +703,7 @@ mod tests {
             tmp.path(),
             &mut state,
             &backend,
+            &NoopOcrBackend,
             DateTime::parse_from_rfc3339("2026-03-24T00:00:01Z")
                 .expect("parse")
                 .with_timezone(&Utc),
@@ -632,6 +768,80 @@ mod tests {
     }
 
     #[test]
+    fn writes_deduped_ocr_history_per_segment() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let final_second = (OCR_FRAME_INTERVAL * 2) as i64;
+        let backend = SequenceBackend::new(
+            (0..=final_second)
+                .map(|_| Ok(vec![display("1", 64, 48)]))
+                .collect(),
+        );
+        let ocr_backend = SequenceOcrBackend::new(vec![
+            Ok(Some(OcrFrameResult {
+                full_text: "Terminal\ncargo test".to_string(),
+            })),
+            Ok(Some(OcrFrameResult {
+                full_text: "Terminal\ncargo test".to_string(),
+            })),
+            Ok(Some(OcrFrameResult {
+                full_text: "Terminal\ncargo test -p codex-app-server".to_string(),
+            })),
+        ]);
+        let mut state = CaptureState::default();
+
+        for second in 0..=final_second {
+            capture_tick(
+                tmp.path(),
+                &mut state,
+                &backend,
+                &ocr_backend,
+                DateTime::from_timestamp(1_700_000_000 + second, 0).expect("timestamp"),
+            )
+            .expect("capture tick");
+        }
+
+        let ocr_path = WalkDir::new(tmp.path())
+            .into_iter()
+            .filter_map(Result::ok)
+            .find(|entry| {
+                entry.file_type().is_file()
+                    && entry
+                        .path()
+                        .to_str()
+                        .is_some_and(|path| path.ends_with(".ocr.jsonl"))
+            })
+            .expect("ocr sidecar")
+            .into_path();
+        let ocr_records = fs::read_to_string(ocr_path)
+            .expect("read ocr sidecar")
+            .lines()
+            .map(|line| serde_json::from_str::<OcrFrameRecord>(line).expect("decode ocr record"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            ocr_records,
+            vec![
+                OcrFrameRecord {
+                    version: 1,
+                    display_id: "1".to_string(),
+                    segment_started_at: 1_700_000_000,
+                    captured_at: 1_700_000_000,
+                    frame_index: 0,
+                    full_text: "Terminal\ncargo test".to_string(),
+                },
+                OcrFrameRecord {
+                    version: 1,
+                    display_id: "1".to_string(),
+                    segment_started_at: 1_700_000_000,
+                    captured_at: 1_700_000_000 + final_second,
+                    frame_index: OCR_FRAME_INTERVAL * 2,
+                    full_text: "Terminal\ncargo test -p codex-app-server".to_string(),
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn backend_errors_propagate() {
         let tmp = TempDir::new().expect("tmpdir");
         let backend = SequenceBackend::new(vec![Err(CaptureBackendFailure {
@@ -644,6 +854,7 @@ mod tests {
             tmp.path(),
             &mut state,
             &backend,
+            &NoopOcrBackend,
             DateTime::from_timestamp(1_700_000_000, 0).expect("timestamp"),
         )
         .expect_err("capture should fail");

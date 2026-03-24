@@ -2,6 +2,8 @@ use super::backend::CaptureBackend;
 use super::backend::CaptureBackendFailure;
 use super::backend::CaptureBackendFailureKind;
 use super::backend::default_capture_backend;
+use super::ocr::OcrBackend;
+use super::ocr::default_ocr_backend;
 use super::persistence::CAPTURE_FPS;
 use super::persistence::CaptureState;
 use super::persistence::RETENTION_HOURS;
@@ -46,6 +48,7 @@ pub(crate) struct ScreenRecordingManager {
 
 struct Inner {
     backend: Arc<dyn CaptureBackend>,
+    ocr_backend: Arc<dyn OcrBackend>,
     outgoing: Arc<OutgoingMessageSender>,
     storage_root: PathBuf,
     lock_path: PathBuf,
@@ -117,6 +120,7 @@ impl ScreenRecordingManager {
         let manager = Self {
             inner: Arc::new(Inner {
                 backend,
+                ocr_backend: default_ocr_backend(),
                 outgoing,
                 storage_root,
                 lock_path,
@@ -507,6 +511,7 @@ impl Inner {
             }
 
             let backend = Arc::clone(&self.backend);
+            let ocr_backend = Arc::clone(&self.ocr_backend);
             let capture_state = Arc::clone(&self.capture_state);
             let storage_root = self.storage_root.clone();
             let captured_at = chrono::Utc::now();
@@ -524,6 +529,7 @@ impl Inner {
                     &storage_root,
                     &mut capture_state,
                     backend.as_ref(),
+                    ocr_backend.as_ref(),
                     captured_at,
                 )
             })
