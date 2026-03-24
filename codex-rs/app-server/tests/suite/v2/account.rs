@@ -855,6 +855,57 @@ async fn login_account_api_key_succeeds_and_notifies() -> Result<()> {
 }
 
 #[tokio::test]
+async fn login_account_ephemeral_api_key_succeeds_and_does_not_write_auth_json() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    create_config_toml(codex_home.path(), CreateConfigTomlParams::default())?;
+
+    let mut mcp = McpProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+
+    let req_id = mcp
+        .send_login_account_ephemeral_api_key_request("sk-ephemeral-test-key")
+        .await?;
+    let resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(req_id)),
+    )
+    .await??;
+    let login: LoginAccountResponse = to_response(resp)?;
+    assert_eq!(login, LoginAccountResponse::ApiKey {});
+
+    let note = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_notification_message("account/login/completed"),
+    )
+    .await??;
+    let parsed: ServerNotification = note.try_into()?;
+    let ServerNotification::AccountLoginCompleted(payload) = parsed else {
+        bail!("unexpected notification: {parsed:?}");
+    };
+    pretty_assertions::assert_eq!(payload.login_id, None);
+    pretty_assertions::assert_eq!(payload.success, true);
+    pretty_assertions::assert_eq!(payload.error, None);
+
+    let note = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_notification_message("account/updated"),
+    )
+    .await??;
+    let parsed: ServerNotification = note.try_into()?;
+    let ServerNotification::AccountUpdated(payload) = parsed else {
+        bail!("unexpected notification: {parsed:?}");
+    };
+    pretty_assertions::assert_eq!(payload.auth_mode, Some(AuthMode::ApiKey));
+    pretty_assertions::assert_eq!(payload.plan_type, None);
+
+    assert!(
+        !codex_home.path().join("auth.json").exists(),
+        "ephemeral API-key login should not write auth.json"
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn login_account_api_key_rejected_when_forced_chatgpt() -> Result<()> {
     let codex_home = TempDir::new()?;
     create_config_toml(

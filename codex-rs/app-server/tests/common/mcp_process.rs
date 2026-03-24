@@ -807,6 +807,18 @@ impl McpProcess {
         self.send_request("account/login/start", Some(params)).await
     }
 
+    /// Send an `account/login/start` JSON-RPC request for ephemeral API key login.
+    pub async fn send_login_account_ephemeral_api_key_request(
+        &mut self,
+        api_key: &str,
+    ) -> anyhow::Result<i64> {
+        let params = serde_json::json!({
+            "type": "ephemeralApiKey",
+            "apiKey": api_key,
+        });
+        self.send_request("account/login/start", Some(params)).await
+    }
+
     /// Send an `account/login/start` JSON-RPC request for ChatGPT login.
     pub async fn send_login_account_chatgpt_request(&mut self) -> anyhow::Result<i64> {
         let params = serde_json::json!({

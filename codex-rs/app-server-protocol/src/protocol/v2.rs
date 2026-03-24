@@ -1610,6 +1610,15 @@ pub enum LoginAccountParams {
         #[ts(rename = "apiKey")]
         api_key: String,
     },
+    /// [UNSTABLE] FOR OPENAI INTERNAL USE ONLY - DO NOT USE.
+    #[experimental("account/login/start.ephemeralApiKey")]
+    #[serde(rename = "ephemeralApiKey", rename_all = "camelCase")]
+    #[ts(rename = "ephemeralApiKey", rename_all = "camelCase")]
+    EphemeralApiKey {
+        #[serde(rename = "apiKey")]
+        #[ts(rename = "apiKey")]
+        api_key: String,
+    },
     #[serde(rename = "chatgpt")]
     #[ts(rename = "chatgpt")]
     Chatgpt,

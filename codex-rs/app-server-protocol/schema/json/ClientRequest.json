@@ -1096,6 +1096,27 @@
           "type": "object"
         },
         {
+          "description": "[UNSTABLE] FOR OPENAI INTERNAL USE ONLY - DO NOT USE.",
+          "properties": {
+            "apiKey": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "ephemeralApiKey"
+              ],
+              "title": "EphemeralApiKeyLoginAccountParamsType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "apiKey",
+            "type"
+          ],
+          "title": "EphemeralApiKeyLoginAccountParams",
+          "type": "object"
+        },
+        {
           "properties": {
             "type": {
               "enum": [

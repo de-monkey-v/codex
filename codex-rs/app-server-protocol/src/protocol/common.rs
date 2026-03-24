@@ -1301,6 +1301,28 @@ mod tests {
     }
 
     #[test]
+    fn serialize_account_login_ephemeral_api_key() -> Result<()> {
+        let request = ClientRequest::LoginAccount {
+            request_id: RequestId::Integer(21),
+            params: v2::LoginAccountParams::EphemeralApiKey {
+                api_key: "secret".to_string(),
+            },
+        };
+        assert_eq!(
+            json!({
+                "method": "account/login/start",
+                "id": 21,
+                "params": {
+                    "type": "ephemeralApiKey",
+                    "apiKey": "secret"
+                }
+            }),
+            serde_json::to_value(&request)?,
+        );
+        Ok(())
+    }
+
+    #[test]
     fn serialize_account_login_chatgpt() -> Result<()> {
         let request = ClientRequest::LoginAccount {
             request_id: RequestId::Integer(3),

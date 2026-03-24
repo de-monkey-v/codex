@@ -72,6 +72,7 @@ use url::Url;
 use uuid::Uuid;
 
 mod additional_dirs;
+mod api_provision;
 mod app;
 mod app_backtrack;
 mod app_command;

@@ -149,6 +149,11 @@ pub(crate) enum AppEvent {
     /// Result of computing a `/diff` command.
     DiffResult(String),
 
+    /// Start browser-based API provisioning for the provided cwd.
+    StartApiProvision {
+        cwd: PathBuf,
+    },
+
     /// Open the app link view in the bottom pane.
     OpenAppLink {
         app_id: String,
