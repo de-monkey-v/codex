@@ -206,6 +206,12 @@ jobs:
               "--action_env=PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
               "--host_action_env=PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
             )
+            if [[ -n "${PKG_CONFIG:-}" ]]; then
+              bazel_args+=(
+                "--action_env=PKG_CONFIG=${PKG_CONFIG}"
+                "--host_action_env=PKG_CONFIG=${PKG_CONFIG}"
+              )
+            fi
           elif [[ "${RUNNER_OS:-}" == "macOS" ]]; then
             bazel_args+=(
               "--action_env=PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
