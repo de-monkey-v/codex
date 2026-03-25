@@ -11,12 +11,9 @@ use crate::export_server_notification_schemas;
 use crate::export_server_param_schemas;
 use crate::export_server_response_schemas;
 use crate::export_server_responses;
-use crate::protocol::common::ALL_CLIENT_METHOD_RESPONSE_TYPES;
-use crate::protocol::common::ALL_SERVER_REQUEST_RESPONSE_TYPES;
 use crate::protocol::common::EXPERIMENTAL_CLIENT_METHOD_PARAM_TYPES;
 use crate::protocol::common::EXPERIMENTAL_CLIENT_METHOD_RESPONSE_TYPES;
 use crate::protocol::common::EXPERIMENTAL_CLIENT_METHODS;
-use crate::protocol::common::EXPERIMENTAL_SERVER_NOTIFICATION_METHODS;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::anyhow;
@@ -29,12 +26,10 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::collections::VecDeque;
 use std::ffi::OsStr;
 use std::fs;
 use std::io::Read;
 use std::io::Write;
-use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
@@ -258,7 +253,6 @@ fn filter_experimental_ts(out_dir: &Path) -> Result<()> {
     filter_client_request_ts(out_dir, EXPERIMENTAL_CLIENT_METHODS)?;
     filter_experimental_type_fields_ts(out_dir, &registered_fields)?;
     remove_generated_type_files(out_dir, &experimental_method_types, "ts")?;
-    prune_unreachable_ts_files(out_dir)?;
     Ok(())
 }
 
@@ -294,7 +288,6 @@ pub(crate) fn filter_experimental_ts_tree(tree: &mut BTreeMap<PathBuf, String>) 
     }
 
     remove_generated_type_entries(tree, &experimental_method_types, "ts");
-    prune_unreachable_ts_tree_entries(tree);
     Ok(())
 }
 
@@ -409,9 +402,7 @@ fn filter_experimental_schema(bundle: &mut Value) -> Result<()> {
     filter_experimental_fields_in_root(bundle, &registered_fields);
     filter_experimental_fields_in_definitions(bundle, &registered_fields);
     prune_experimental_methods(bundle, EXPERIMENTAL_CLIENT_METHODS);
-    prune_experimental_methods(bundle, EXPERIMENTAL_SERVER_NOTIFICATION_METHODS);
     remove_experimental_method_type_definitions(bundle);
-    prune_unreachable_definition_paths(bundle);
     Ok(())
 }
 
@@ -557,6 +548,8 @@ fn filter_experimental_json_files(out_dir: &Path) -> Result<()> {
         filter_experimental_schema(&mut value)?;
         write_pretty_json(path, &value)?;
     }
+    let experimental_method_types = experimental_method_types();
+    remove_generated_type_files(out_dir, &experimental_method_types, "json")?;
     Ok(())
 }
 
@@ -620,217 +613,6 @@ fn remove_generated_type_entries(
     }
 }
 
-fn prune_unreachable_ts_files(out_dir: &Path) -> Result<()> {
-    let root_files = ts_root_files(out_dir);
-    if root_files.is_empty() {
-        return Ok(());
-    }
-
-    let all_files = ts_files_in_recursive(out_dir)?;
-    let mut imports_by_file: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
-    for file in &all_files {
-        imports_by_file.insert(file.clone(), imported_ts_files(file)?);
-    }
-
-    let mut reachable: HashSet<PathBuf> = HashSet::new();
-    let mut queue: VecDeque<PathBuf> = root_files.into_iter().collect();
-    while let Some(path) = queue.pop_front() {
-        if !reachable.insert(path.clone()) {
-            continue;
-        }
-        if let Some(children) = imports_by_file.get(&path) {
-            queue.extend(children.iter().filter(|&child| child.exists()).cloned());
-        }
-    }
-
-    for file in all_files {
-        if reachable.contains(&file) {
-            continue;
-        }
-        fs::remove_file(&file).with_context(|| format!("Failed to remove {}", file.display()))?;
-    }
-
-    Ok(())
-}
-
-fn prune_unreachable_ts_tree_entries(tree: &mut BTreeMap<PathBuf, String>) {
-    let root_files = ts_root_tree_paths(tree);
-    if root_files.is_empty() {
-        return;
-    }
-
-    let mut imports_by_file: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
-    for (path, content) in tree.iter() {
-        imports_by_file.insert(path.clone(), imported_ts_tree_files(path, content));
-    }
-
-    let mut reachable: HashSet<PathBuf> = HashSet::new();
-    let mut queue: VecDeque<PathBuf> = root_files.into_iter().collect();
-    while let Some(path) = queue.pop_front() {
-        if !reachable.insert(path.clone()) {
-            continue;
-        }
-        if let Some(children) = imports_by_file.get(&path) {
-            queue.extend(
-                children
-                    .iter()
-                    .filter(|&child| tree.contains_key(child))
-                    .cloned(),
-            );
-        }
-    }
-
-    tree.retain(|path, _| reachable.contains(path));
-}
-
-fn ts_root_files(out_dir: &Path) -> HashSet<PathBuf> {
-    let mut roots = HashSet::from([
-        out_dir.join("ClientRequest.ts"),
-        out_dir.join("ClientNotification.ts"),
-        out_dir.join("ServerRequest.ts"),
-        out_dir.join("ServerNotification.ts"),
-    ]);
-    for type_names in [
-        ALL_CLIENT_METHOD_RESPONSE_TYPES,
-        ALL_SERVER_REQUEST_RESPONSE_TYPES,
-    ] {
-        add_matching_type_root_files(out_dir, type_names, &mut roots);
-    }
-    roots.retain(|path| path.exists());
-    roots
-}
-
-fn ts_root_tree_paths(tree: &BTreeMap<PathBuf, String>) -> HashSet<PathBuf> {
-    let mut roots = HashSet::from([
-        PathBuf::from("ClientRequest.ts"),
-        PathBuf::from("ClientNotification.ts"),
-        PathBuf::from("ServerRequest.ts"),
-        PathBuf::from("ServerNotification.ts"),
-    ]);
-    for type_names in [
-        ALL_CLIENT_METHOD_RESPONSE_TYPES,
-        ALL_SERVER_REQUEST_RESPONSE_TYPES,
-    ] {
-        add_matching_type_root_tree_paths(tree, type_names, &mut roots);
-    }
-    roots.retain(|path| tree.contains_key(path));
-    roots
-}
-
-fn add_matching_type_root_files(out_dir: &Path, type_names: &[&str], roots: &mut HashSet<PathBuf>) {
-    for type_name in type_names {
-        let trimmed = type_name.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let name = trimmed.rsplit("::").next().unwrap_or(trimmed);
-        for subdir in ["", "v1", "v2"] {
-            let path = if subdir.is_empty() {
-                out_dir.join(format!("{name}.ts"))
-            } else {
-                out_dir.join(subdir).join(format!("{name}.ts"))
-            };
-            if path.exists() {
-                roots.insert(path);
-            }
-        }
-    }
-}
-
-fn add_matching_type_root_tree_paths(
-    tree: &BTreeMap<PathBuf, String>,
-    type_names: &[&str],
-    roots: &mut HashSet<PathBuf>,
-) {
-    for type_name in type_names {
-        let trimmed = type_name.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let name = trimmed.rsplit("::").next().unwrap_or(trimmed);
-        for subdir in ["", "v1", "v2"] {
-            let path = if subdir.is_empty() {
-                PathBuf::from(format!("{name}.ts"))
-            } else {
-                PathBuf::from(subdir).join(format!("{name}.ts"))
-            };
-            if tree.contains_key(&path) {
-                roots.insert(path);
-            }
-        }
-    }
-}
-
-fn imported_ts_files(path: &Path) -> Result<Vec<PathBuf>> {
-    let content =
-        fs::read_to_string(path).with_context(|| format!("Failed to read {}", path.display()))?;
-    let mut imports = Vec::new();
-    for line in content.lines() {
-        let Some(specifier) = extract_relative_import_specifier(line) else {
-            continue;
-        };
-        let Some(parent) = path.parent() else {
-            continue;
-        };
-        let import_path = if specifier.ends_with(".ts") {
-            normalize_path(&parent.join(specifier))
-        } else {
-            normalize_path(&parent.join(format!("{specifier}.ts")))
-        };
-        if import_path.exists() {
-            imports.push(import_path);
-        }
-    }
-    Ok(imports)
-}
-
-fn imported_ts_tree_files(path: &Path, content: &str) -> Vec<PathBuf> {
-    let mut imports = Vec::new();
-    for line in content.lines() {
-        let Some(specifier) = extract_relative_import_specifier(line) else {
-            continue;
-        };
-        let Some(parent) = path.parent() else {
-            continue;
-        };
-        let import_path = if specifier.ends_with(".ts") {
-            normalize_path(&parent.join(specifier))
-        } else {
-            normalize_path(&parent.join(format!("{specifier}.ts")))
-        };
-        imports.push(import_path);
-    }
-    imports
-}
-
-fn extract_relative_import_specifier(line: &str) -> Option<&str> {
-    if !line.starts_with("import ") || !line.contains(" from ") {
-        return None;
-    }
-    let quote = if line.contains('"') { '"' } else { '\'' };
-    let start = line.find(quote)? + 1;
-    let end = line[start..].find(quote)? + start;
-    let specifier = &line[start..end];
-    specifier.starts_with('.').then_some(specifier)
-}
-
-fn normalize_path(path: &Path) -> PathBuf {
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                normalized.pop();
-            }
-            Component::Normal(part) => normalized.push(part),
-            Component::RootDir | Component::Prefix(_) => {
-                normalized.push(component.as_os_str());
-            }
-        }
-    }
-    normalized
-}
-
 fn remove_experimental_method_type_definitions(bundle: &mut Value) {
     let type_names = experimental_method_types();
     let Some(definitions) = bundle.get_mut("definitions").and_then(Value::as_object_mut) else {
@@ -866,186 +648,6 @@ fn remove_experimental_method_type_definitions_map(
                 experimental_type_names,
             );
         }
-    }
-}
-
-fn prune_unreachable_definition_paths(schema: &mut Value) {
-    let reachable = reachable_definition_paths(schema, "definitions");
-    let Some(definitions) = schema.get_mut("definitions").and_then(Value::as_object_mut) else {
-        return;
-    };
-    retain_reachable_definition_paths(definitions, "", &reachable);
-}
-
-fn reachable_definition_paths(schema: &Value, defs_key: &str) -> HashSet<String> {
-    let Some(definitions) = schema.get(defs_key).and_then(Value::as_object) else {
-        return HashSet::new();
-    };
-    let mut queue: VecDeque<String> = VecDeque::new();
-    let mut reachable = root_definition_paths(definitions);
-    queue.extend(reachable.iter().cloned());
-
-    collect_definition_refs_excluding_maps(schema, defs_key, &mut queue, &mut reachable);
-
-    while let Some(path) = queue.pop_front() {
-        if let Some(def_schema) = definition_at_path(definitions, &path) {
-            collect_definition_refs(def_schema, defs_key, &mut queue, &mut reachable);
-        }
-    }
-
-    reachable
-}
-
-fn root_definition_paths(definitions: &Map<String, Value>) -> HashSet<String> {
-    let mut roots: HashSet<String> = SPECIAL_DEFINITIONS
-        .iter()
-        .map(|name| (*name).to_string())
-        .collect();
-    for type_names in [
-        ALL_CLIENT_METHOD_RESPONSE_TYPES,
-        ALL_SERVER_REQUEST_RESPONSE_TYPES,
-    ] {
-        add_matching_definition_root_paths(definitions, type_names, &mut roots);
-    }
-    roots.retain(|path| definition_at_path(definitions, path).is_some());
-    if roots.is_empty() {
-        roots.extend(definitions.keys().cloned());
-    }
-    roots
-}
-
-fn add_matching_definition_root_paths(
-    definitions: &Map<String, Value>,
-    type_names: &[&str],
-    roots: &mut HashSet<String>,
-) {
-    for type_name in type_names {
-        let trimmed = type_name.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let name = trimmed.rsplit("::").next().unwrap_or(trimmed);
-        for candidate in [name.to_string(), format!("v1/{name}"), format!("v2/{name}")] {
-            if definition_at_path(definitions, &candidate).is_some() {
-                roots.insert(candidate);
-            }
-        }
-    }
-}
-
-fn collect_definition_refs_excluding_maps(
-    value: &Value,
-    defs_key: &str,
-    queue: &mut VecDeque<String>,
-    reachable: &mut HashSet<String>,
-) {
-    match value {
-        Value::Object(map) => {
-            for (key, child) in map {
-                if key == defs_key || key == "$defs" || key == "definitions" {
-                    continue;
-                }
-                collect_definition_refs_excluding_maps(child, defs_key, queue, reachable);
-            }
-        }
-        Value::Array(items) => {
-            for child in items {
-                collect_definition_refs_excluding_maps(child, defs_key, queue, reachable);
-            }
-        }
-        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
-    }
-    collect_definition_ref_here(value, defs_key, queue, reachable);
-}
-
-fn collect_definition_refs(
-    value: &Value,
-    defs_key: &str,
-    queue: &mut VecDeque<String>,
-    reachable: &mut HashSet<String>,
-) {
-    collect_definition_ref_here(value, defs_key, queue, reachable);
-    match value {
-        Value::Object(map) => {
-            for child in map.values() {
-                collect_definition_refs(child, defs_key, queue, reachable);
-            }
-        }
-        Value::Array(items) => {
-            for child in items {
-                collect_definition_refs(child, defs_key, queue, reachable);
-            }
-        }
-        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
-    }
-}
-
-fn collect_definition_ref_here(
-    value: &Value,
-    defs_key: &str,
-    queue: &mut VecDeque<String>,
-    reachable: &mut HashSet<String>,
-) {
-    let Some(reference) = value
-        .as_object()
-        .and_then(|obj| obj.get("$ref"))
-        .and_then(Value::as_str)
-    else {
-        return;
-    };
-    let Some(path) = reference.strip_prefix(&format!("#/{defs_key}/")) else {
-        return;
-    };
-    if reachable.insert(path.to_string()) {
-        queue.push_back(path.to_string());
-    }
-}
-
-fn definition_at_path<'a>(definitions: &'a Map<String, Value>, path: &str) -> Option<&'a Value> {
-    let mut segments = path.split('/');
-    let first = segments.next()?;
-    let mut current = definitions.get(first)?;
-    for segment in segments {
-        current = current.as_object()?.get(segment)?;
-    }
-    Some(current)
-}
-
-fn retain_reachable_definition_paths(
-    definitions: &mut Map<String, Value>,
-    prefix: &str,
-    reachable: &HashSet<String>,
-) {
-    let keys_to_remove: Vec<String> = definitions
-        .keys()
-        .filter(|key| {
-            let path = if prefix.is_empty() {
-                (*key).clone()
-            } else {
-                format!("{prefix}/{key}")
-            };
-            !reachable
-                .iter()
-                .any(|entry| entry == &path || entry.starts_with(&format!("{path}/")))
-        })
-        .cloned()
-        .collect();
-    for key in keys_to_remove {
-        definitions.remove(&key);
-    }
-    for (key, value) in definitions.iter_mut() {
-        if !is_namespace_map(value) {
-            continue;
-        }
-        let Some(child_definitions) = value.as_object_mut() else {
-            continue;
-        };
-        let next_prefix = if prefix.is_empty() {
-            key.clone()
-        } else {
-            format!("{prefix}/{key}")
-        };
-        retain_reachable_definition_paths(child_definitions, &next_prefix, reachable);
     }
 }
 
