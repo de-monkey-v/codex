@@ -4726,7 +4726,8 @@ impl ChatWidget {
                     self.config.forced_login_method,
                 ) {
                     Ok(start_message) => {
-                        self.add_info_message(start_message.message, start_message.hint);
+                        self.add_boxed_history(Box::new(start_message));
+                        self.request_redraw();
                     }
                     Err(err) => {
                         self.add_error_message(err);

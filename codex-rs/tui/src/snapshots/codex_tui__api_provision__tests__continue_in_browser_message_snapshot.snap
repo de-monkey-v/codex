@@ -1,0 +1,13 @@
+---
+source: tui/src/api_provision.rs
+expression: render_cell(&cell)
+---
+• Finish API provisioning via your browser.
+
+  If the link doesn't open automatically, open the following link to authenticate:
+
+  https://auth.openai.com/oauth/authorize?client_id=abc
+
+  Codex will save OPENAI_API_KEY to /tmp/workspace/.env.local and hot-apply it here when allowed.
+
+  On a remote or headless machine, forward localhost:5000 to this Codex host before opening the link.

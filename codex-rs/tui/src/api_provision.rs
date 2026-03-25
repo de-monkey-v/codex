@@ -14,16 +14,13 @@ use codex_login::start_api_provisioning;
 use codex_login::upsert_dotenv_api_key;
 use codex_login::validate_dotenv_target;
 use codex_protocol::config_types::ForcedLoginMethod;
+use ratatui::style::Stylize;
+use ratatui::text::Line;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::history_cell;
 use crate::history_cell::PlainHistoryCell;
-
-pub(crate) struct ApiProvisionStartMessage {
-    pub(crate) message: String,
-    pub(crate) hint: Option<String>,
-}
 
 pub(crate) fn start_command(
     app_event_tx: AppEventSender,
@@ -31,16 +28,12 @@ pub(crate) fn start_command(
     codex_home: PathBuf,
     cwd: PathBuf,
     forced_login_method: Option<ForcedLoginMethod>,
-) -> Result<ApiProvisionStartMessage, String> {
+) -> Result<PlainHistoryCell, String> {
     if read_openai_api_key_from_env().is_some() {
         return Ok(existing_shell_api_key_message());
     }
 
     let dotenv_path = cwd.join(".env.local");
-    let start_hint = format!(
-        "Codex will save {OPENAI_API_KEY_ENV_VAR} to {path} and hot-apply it here when allowed.",
-        path = dotenv_path.display()
-    );
     validate_dotenv_target(&dotenv_path).map_err(|err| {
         format!(
             "Unable to prepare {} for {OPENAI_API_KEY_ENV_VAR}: {err}",
@@ -48,14 +41,13 @@ pub(crate) fn start_command(
         )
     })?;
 
-    let session = start_api_provisioning(ApiProvisionOptions::default())
+    let options = ApiProvisionOptions::default();
+    let callback_port = options.callback_port;
+    let session = start_api_provisioning(options)
         .map_err(|err| format!("Failed to start API provisioning: {err}"))?;
-    if !session.open_browser() {
-        return Err(
-            "Failed to open your browser for API provisioning. Try again from a desktop session or use the helper binary."
-                .to_string(),
-        );
-    }
+    let _ = session.open_browser();
+    let start_message =
+        continue_in_browser_message(session.auth_url(), &dotenv_path, callback_port);
 
     let app_event_tx_for_task = app_event_tx;
     let dotenv_path_for_task = dotenv_path;
@@ -71,21 +63,61 @@ pub(crate) fn start_command(
         app_event_tx_for_task.send(AppEvent::InsertHistoryCell(Box::new(cell)));
     });
 
-    Ok(ApiProvisionStartMessage {
-        message: "Opening your browser to provision a project API key.".to_string(),
-        hint: Some(start_hint),
-    })
+    Ok(start_message)
 }
 
-fn existing_shell_api_key_message() -> ApiProvisionStartMessage {
-    ApiProvisionStartMessage {
-        message: format!(
+fn existing_shell_api_key_message() -> PlainHistoryCell {
+    history_cell::new_info_event(
+        format!(
             "{OPENAI_API_KEY_ENV_VAR} is already set in this Codex session; skipping API provisioning."
         ),
-        hint: Some(format!(
+        Some(format!(
             "This Codex session already inherited {OPENAI_API_KEY_ENV_VAR} from its shell environment. Unset it and run /api-provision again if you want Codex to provision and save a different key."
         )),
-    }
+    )
+}
+
+fn continue_in_browser_message(
+    auth_url: &str,
+    dotenv_path: &Path,
+    callback_port: u16,
+) -> PlainHistoryCell {
+    let mut lines = vec![
+        vec![
+            "• ".dim(),
+            "Finish API provisioning via your browser.".into(),
+        ]
+        .into(),
+        "".into(),
+    ];
+
+    lines.push(
+        "  If the link doesn't open automatically, open the following link to authenticate:".into(),
+    );
+    lines.push("".into());
+    lines.push(Line::from(vec![
+        "  ".into(),
+        auth_url.to_string().cyan().underlined(),
+    ]));
+    lines.push("".into());
+    lines.push(
+        format!(
+            "  Codex will save {OPENAI_API_KEY_ENV_VAR} to {} and hot-apply it here when allowed.",
+            dotenv_path.display()
+        )
+        .dark_gray()
+        .into(),
+    );
+    lines.push("".into());
+    lines.push(
+        format!(
+            "  On a remote or headless machine, forward localhost:{callback_port} to this Codex host before opening the link."
+        )
+        .dark_gray()
+        .into(),
+    );
+
+    PlainHistoryCell::new(lines)
 }
 
 async fn complete_command(
@@ -230,18 +262,23 @@ mod tests {
     }
 
     #[test]
+    fn continue_in_browser_message_snapshot() {
+        let cell = continue_in_browser_message(
+            "https://auth.openai.com/oauth/authorize?client_id=abc",
+            Path::new("/tmp/workspace/.env.local"),
+            /*callback_port*/ 5000,
+        );
+
+        assert_snapshot!(render_cell(&cell));
+    }
+
+    #[test]
     fn existing_shell_api_key_message_mentions_openai_api_key() {
-        let message = existing_shell_api_key_message();
+        let cell = existing_shell_api_key_message();
 
         assert_eq!(
-            message.message,
-            "OPENAI_API_KEY is already set in this Codex session; skipping API provisioning."
-        );
-        assert_eq!(
-            message.hint,
-            Some(
-                "This Codex session already inherited OPENAI_API_KEY from its shell environment. Unset it and run /api-provision again if you want Codex to provision and save a different key.".to_string()
-            )
+            render_cell(&cell),
+            "• OPENAI_API_KEY is already set in this Codex session; skipping API provisioning. This Codex session already inherited OPENAI_API_KEY from its shell environment. Unset it and run /api-provision again if you want Codex to provision and save a different key."
         );
     }
 
