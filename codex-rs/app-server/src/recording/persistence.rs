@@ -364,7 +364,11 @@ fn maybe_write_ocr_frame(
     ocr_backend: &dyn OcrBackend,
     captured_at: DateTime<Utc>,
 ) -> std::io::Result<()> {
-    if stream.segment.frame_index % OCR_FRAME_INTERVAL != 0 {
+    if !stream
+        .segment
+        .frame_index
+        .is_multiple_of(OCR_FRAME_INTERVAL)
+    {
         return Ok(());
     }
     let Some(ocr_result) = ocr_backend.recognize(OcrInput {

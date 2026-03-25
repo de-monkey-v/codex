@@ -1002,6 +1002,27 @@
       ],
       "type": "object"
     },
+    "FsChangedNotification": {
+      "description": "Filesystem watch notification emitted for `fs/watch` subscribers.",
+      "properties": {
+        "changedPaths": {
+          "description": "File or directory paths associated with this event.",
+          "items": {
+            "$ref": "#/definitions/AbsolutePathBuf"
+          },
+          "type": "array"
+        },
+        "watchId": {
+          "description": "Watch identifier returned by `fs/watch`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "changedPaths",
+        "watchId"
+      ],
+      "type": "object"
+    },
     "FuzzyFileSearchMatchType": {
       "enum": [
         "file",
@@ -4504,6 +4525,26 @@
         "params"
       ],
       "title": "App/list/updatedNotification",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "fs/changed"
+          ],
+          "title": "Fs/changedNotificationMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/FsChangedNotification"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "title": "Fs/changedNotification",
       "type": "object"
     },
     {

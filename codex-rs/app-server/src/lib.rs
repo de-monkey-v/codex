@@ -22,6 +22,7 @@ use crate::message_processor::MessageProcessorArgs;
 use crate::outgoing_message::ConnectionId;
 use crate::outgoing_message::OutgoingEnvelope;
 use crate::outgoing_message::OutgoingMessageSender;
+use crate::outgoing_message::QueuedOutgoingMessage;
 use crate::transport::CHANNEL_CAPACITY;
 use crate::transport::ConnectionState;
 use crate::transport::OutboundConnectionState;
@@ -66,6 +67,7 @@ mod error_code;
 mod external_agent_config_api;
 mod filters;
 mod fs_api;
+mod fs_watch;
 mod fuzzy_file_search;
 pub mod in_process;
 mod message_processor;
@@ -104,9 +106,7 @@ enum OutboundControlEvent {
     /// Register a new writer for an opened connection.
     Opened {
         connection_id: ConnectionId,
-        writer: mpsc::Sender<crate::outgoing_message::OutgoingMessage>,
-        // Allow codex/event/* notifications to be emitted.
-        allow_legacy_notifications: bool,
+        writer: mpsc::Sender<QueuedOutgoingMessage>,
         disconnect_sender: Option<CancellationToken>,
         initialized: Arc<AtomicBool>,
         experimental_api_enabled: Arc<AtomicBool>,
@@ -563,7 +563,6 @@ pub async fn run_main_with_transport(
                             OutboundControlEvent::Opened {
                                 connection_id,
                                 writer,
-                                allow_legacy_notifications,
                                 disconnect_sender,
                                 initialized,
                                 experimental_api_enabled,
@@ -576,7 +575,6 @@ pub async fn run_main_with_transport(
                                         initialized,
                                         experimental_api_enabled,
                                         opted_out_notification_methods,
-                                        allow_legacy_notifications,
                                         disconnect_sender,
                                     ),
                                 );
@@ -619,8 +617,6 @@ pub async fn run_main_with_transport(
             cli_overrides,
             loader_overrides,
             cloud_requirements: cloud_requirements.clone(),
-            auth_manager: None,
-            thread_manager: None,
             feedback: feedback.clone(),
             log_db,
             config_warnings,
@@ -676,7 +672,6 @@ pub async fn run_main_with_transport(
                             TransportEvent::ConnectionOpened {
                                 connection_id,
                                 writer,
-                                allow_legacy_notifications,
                                 disconnect_sender,
                             } => {
                                 let outbound_initialized = Arc::new(AtomicBool::new(false));
@@ -688,7 +683,6 @@ pub async fn run_main_with_transport(
                                     .send(OutboundControlEvent::Opened {
                                         connection_id,
                                         writer,
-                                        allow_legacy_notifications,
                                         disconnect_sender,
                                         initialized: Arc::clone(&outbound_initialized),
                                         experimental_api_enabled: Arc::clone(

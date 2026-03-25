@@ -38,6 +38,7 @@ use crate::protocol::NetworkApprovalProtocol;
 use crate::protocol::RateLimitSnapshot;
 use crate::protocol::RateLimitWindow;
 use crate::protocol::ResumedHistory;
+use crate::protocol::RolloutItem;
 use crate::protocol::TokenCountEvent;
 use crate::protocol::TokenUsage;
 use crate::protocol::TokenUsageInfo;
@@ -1114,18 +1115,12 @@ async fn recompute_token_usage_updates_model_context_window() {
 #[tokio::test]
 async fn record_initial_history_reconstructs_forked_transcript() {
     let (session, turn_context) = make_session_and_context().await;
-    let (rollout_items, mut expected) = sample_rollout(&session, &turn_context).await;
+    let (rollout_items, expected) = sample_rollout(&session, &turn_context).await;
 
     session
         .record_initial_history(InitialHistory::Forked(rollout_items))
         .await;
 
-    let reconstruction_turn = session.new_default_turn().await;
-    expected.extend(
-        session
-            .build_initial_context(reconstruction_turn.as_ref())
-            .await,
-    );
     let history = session.state.lock().await.clone_history();
     assert_eq!(expected, history.raw_items());
 }
@@ -1166,6 +1161,35 @@ async fn fork_startup_context_then_first_turn_diff_snapshot() -> anyhow::Result<
         })
         .await?;
     wait_for_event(&initial.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    // The parent rollout writer drains asynchronously after turn completion.
+    // Wait until the persisted JSONL includes the source user turn before forking from it.
+    let mut source_history_persisted = false;
+    for _ in 0..100 {
+        let history = RolloutRecorder::get_rollout_history(&rollout_path).await;
+        source_history_persisted = history.ok().is_some_and(|history| {
+            history.get_rollout_items().into_iter().any(|item| {
+                matches!(
+                        item,
+                        RolloutItem::ResponseItem(ResponseItem::Message { role, content, .. })
+                            if role == "user"
+                                && content.iter().any(|content_item| {
+                                    matches!(
+                                        content_item,
+                                        ContentItem::InputText { text } if text == "fork seed"
+                                    )
+                                })
+                )
+            })
+        });
+        if source_history_persisted {
+            break;
+        }
+        sleep(StdDuration::from_millis(10)).await;
+    }
+    assert!(
+        source_history_persisted,
+        "source rollout should contain the completed pre-fork user turn before forking"
+    );
 
     let mut fork_config = initial.config.clone();
     fork_config.permissions.approval_policy =
@@ -1214,7 +1238,7 @@ async fn fork_startup_context_then_first_turn_diff_snapshot() -> anyhow::Result<
 
     let request = first_forked_request.single_request();
     let snapshot = context_snapshot::format_labeled_requests_snapshot(
-        "First request after fork when fork startup changes approval policy and the first forked turn changes approval policy again and enters plan mode.",
+        "First request after fork when startup preserves the parent baseline, the fork changes approval policy, and the first forked turn enters plan mode.",
         &[("First Forked Turn Request", &request)],
         &ContextSnapshotOptions::default()
             .render_mode(ContextSnapshotRenderMode::KindWithTextPrefix { max_chars: 96 })
@@ -1257,7 +1281,7 @@ async fn record_initial_history_forked_hydrates_previous_turn_settings() {
         user_instructions: None,
         developer_instructions: None,
         final_output_json_schema: None,
-        truncation_policy: Some(turn_context.truncation_policy.into()),
+        truncation_policy: Some(turn_context.truncation_policy),
     };
     let turn_id = previous_context_item
         .turn_id
@@ -1279,7 +1303,7 @@ async fn record_initial_history_forked_hydrates_previous_turn_settings() {
                 text_elements: Vec::new(),
             },
         )),
-        RolloutItem::TurnContext(previous_context_item),
+        RolloutItem::TurnContext(previous_context_item.clone()),
         RolloutItem::EventMsg(EventMsg::TurnComplete(
             codex_protocol::protocol::TurnCompleteEvent {
                 turn_id,
@@ -1292,12 +1316,20 @@ async fn record_initial_history_forked_hydrates_previous_turn_settings() {
         .record_initial_history(InitialHistory::Forked(rollout_items))
         .await;
 
+    let history = session.clone_history().await;
     assert_eq!(
         session.previous_turn_settings().await,
         Some(PreviousTurnSettings {
             model: previous_model.to_string(),
             realtime_active: Some(turn_context.realtime_active),
         })
+    );
+    assert_eq!(history.raw_items(), &[]);
+    assert_eq!(
+        serde_json::to_value(session.reference_context_item().await)
+            .expect("serialize fork reference context item"),
+        serde_json::to_value(Some(previous_context_item))
+            .expect("serialize expected reference context item")
     );
 }
 
@@ -2494,7 +2526,7 @@ async fn session_new_fails_when_zsh_fork_enabled_without_zsh_path() {
         skills_manager,
         plugins_manager,
         mcp_manager,
-        Arc::new(FileWatcher::noop()),
+        Arc::new(SkillsWatcher::noop()),
         AgentControl::default(),
     )
     .await;
@@ -2593,7 +2625,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
             .expect("create environment"),
     );
 
-    let file_watcher = Arc::new(FileWatcher::noop());
+    let skills_watcher = Arc::new(SkillsWatcher::noop());
     let services = SessionServices {
         mcp_connection_manager: Arc::new(RwLock::new(
             McpConnectionManager::new_mcp_connection_manager_for_tests(
@@ -2627,7 +2659,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         skills_manager,
         plugins_manager,
         mcp_manager,
-        file_watcher,
+        skills_watcher,
         agent_control,
         network_proxy: None,
         network_approval: Arc::clone(&network_approval),
@@ -3428,7 +3460,7 @@ pub(crate) async fn make_session_and_context_with_dynamic_tools_and_rx(
             .expect("create environment"),
     );
 
-    let file_watcher = Arc::new(FileWatcher::noop());
+    let skills_watcher = Arc::new(SkillsWatcher::noop());
     let services = SessionServices {
         mcp_connection_manager: Arc::new(RwLock::new(
             McpConnectionManager::new_mcp_connection_manager_for_tests(
@@ -3462,7 +3494,7 @@ pub(crate) async fn make_session_and_context_with_dynamic_tools_and_rx(
         skills_manager,
         plugins_manager,
         mcp_manager,
-        file_watcher,
+        skills_watcher,
         agent_control,
         network_proxy: None,
         network_approval: Arc::clone(&network_approval),
