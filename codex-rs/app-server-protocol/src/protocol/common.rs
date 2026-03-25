@@ -78,12 +78,6 @@ macro_rules! experimental_type_entry {
     };
 }
 
-macro_rules! type_name_entry {
-    ($ty:ty) => {
-        stringify!($ty)
-    };
-}
-
 /// Generates an `enum ClientRequest` where each variant is a request that the
 /// client can send to the server. Each variant has associated `params` and
 /// `response` types. Also generates a `export_client_responses()` function to
@@ -168,12 +162,6 @@ macro_rules! client_request_definitions {
                 experimental_type_entry!($(#[experimental($reason)])? $response),
             )*
         ];
-        pub(crate) const ALL_CLIENT_METHOD_RESPONSE_TYPES: &[&str] = &[
-            $(
-                type_name_entry!($response),
-            )*
-        ];
-
         pub fn export_client_responses(
             out_dir: &::std::path::Path,
         ) -> ::std::result::Result<(), ::ts_rs::ExportError> {
@@ -633,12 +621,6 @@ macro_rules! server_request_definitions {
             )*
         }
 
-        pub(crate) const ALL_SERVER_REQUEST_RESPONSE_TYPES: &[&str] = &[
-            $(
-                type_name_entry!($response),
-            )*
-        ];
-
         #[allow(clippy::vec_init_then_push)]
         pub fn export_server_response_schemas(
             out_dir: &Path,
@@ -976,16 +958,6 @@ server_notification_definitions! {
     AccountLoginCompleted(v2::AccountLoginCompletedNotification),
 
 }
-
-pub(crate) const EXPERIMENTAL_SERVER_NOTIFICATION_METHODS: &[&str] = &[
-    "recording/screen/status/updated",
-    "thread/realtime/started",
-    "thread/realtime/itemAdded",
-    "thread/realtime/transcriptUpdated",
-    "thread/realtime/outputAudio/delta",
-    "thread/realtime/error",
-    "thread/realtime/closed",
-];
 
 client_notification_definitions! {
     Initialized,
