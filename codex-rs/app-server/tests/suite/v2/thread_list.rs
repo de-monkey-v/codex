@@ -189,7 +189,7 @@ async fn thread_list_basic_empty() -> Result<()> {
 }
 
 #[tokio::test]
-async fn thread_list_reads_metadata_from_rollout_without_sqlite() -> Result<()> {
+async fn thread_list_ignores_metadata_from_rollout_without_sqlite() -> Result<()> {
     let codex_home = TempDir::new()?;
     create_minimal_config(codex_home.path())?;
 
@@ -220,7 +220,7 @@ async fn thread_list_reads_metadata_from_rollout_without_sqlite() -> Result<()> 
         .into_iter()
         .find(|candidate| candidate.id == thread_id)
         .expect("expected stored thread to be listed");
-    assert_eq!(listed.metadata, metadata);
+    assert!(listed.metadata.is_empty());
 
     Ok(())
 }

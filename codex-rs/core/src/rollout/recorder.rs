@@ -84,7 +84,6 @@ pub enum RolloutRecorderParams {
         forked_from_id: Option<ThreadId>,
         source: SessionSource,
         base_instructions: BaseInstructions,
-        metadata: BTreeMap<String, String>,
         dynamic_tools: Vec<DynamicToolSpec>,
         event_persistence_mode: EventPersistenceMode,
     },
@@ -117,32 +116,11 @@ impl RolloutRecorderParams {
         dynamic_tools: Vec<DynamicToolSpec>,
         event_persistence_mode: EventPersistenceMode,
     ) -> Self {
-        Self::new_with_metadata(
-            conversation_id,
-            forked_from_id,
-            source,
-            base_instructions,
-            BTreeMap::new(),
-            dynamic_tools,
-            event_persistence_mode,
-        )
-    }
-
-    pub fn new_with_metadata(
-        conversation_id: ThreadId,
-        forked_from_id: Option<ThreadId>,
-        source: SessionSource,
-        base_instructions: BaseInstructions,
-        metadata: BTreeMap<String, String>,
-        dynamic_tools: Vec<DynamicToolSpec>,
-        event_persistence_mode: EventPersistenceMode,
-    ) -> Self {
         Self::Create {
             conversation_id,
             forked_from_id,
             source,
             base_instructions,
-            metadata,
             dynamic_tools,
             event_persistence_mode,
         }
@@ -404,7 +382,6 @@ impl RolloutRecorder {
                     forked_from_id,
                     source,
                     base_instructions,
-                    metadata,
                     dynamic_tools,
                     event_persistence_mode,
                 } => {
@@ -439,7 +416,7 @@ impl RolloutRecorder {
                         } else {
                             Some(dynamic_tools)
                         },
-                        metadata,
+                        metadata: Default::default(),
                         memory_mode: (!config.memories.generate_memories)
                             .then_some("disabled".to_string()),
                     };

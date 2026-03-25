@@ -91,7 +91,7 @@ async fn thread_read_returns_summary_without_turns() -> Result<()> {
     assert_eq!(thread.cwd, PathBuf::from("/"));
     assert_eq!(thread.cli_version, "0.0.0");
     assert_eq!(thread.source, SessionSource::Cli);
-    assert_eq!(thread.metadata, metadata);
+    assert!(thread.metadata.is_empty());
     assert_eq!(thread.git_info, None);
     assert_eq!(thread.turns.len(), 0);
     assert_eq!(thread.status, ThreadStatus::NotLoaded);

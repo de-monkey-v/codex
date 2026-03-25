@@ -1467,14 +1467,13 @@ impl Session {
                 let conversation_id = ThreadId::default();
                 (
                     conversation_id,
-                    RolloutRecorderParams::new_with_metadata(
+                    RolloutRecorderParams::new(
                         conversation_id,
                         forked_from_id,
                         session_source,
                         BaseInstructions {
                             text: session_configuration.base_instructions.clone(),
                         },
-                        session_configuration.metadata.clone(),
                         session_configuration.dynamic_tools.clone(),
                         if session_configuration.persist_extended_history {
                             EventPersistenceMode::Extended

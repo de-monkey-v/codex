@@ -8297,7 +8297,7 @@ pub(crate) async fn read_summary_from_rollout(
         cwd: session_meta.cwd,
         cli_version: session_meta.cli_version,
         source: session_meta.source,
-        metadata: session_meta.metadata,
+        metadata: BTreeMap::new(),
         git_info,
     })
 }
@@ -8358,7 +8358,7 @@ fn extract_conversation_summary(
         cwd: session_meta.cwd.clone(),
         cli_version: session_meta.cli_version.clone(),
         source: session_meta.source.clone(),
-        metadata: session_meta.metadata.clone(),
+        metadata: BTreeMap::new(),
         git_info,
     })
 }
