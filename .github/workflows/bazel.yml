@@ -209,6 +209,9 @@ jobs:
             bazel_args+=(
               "--action_env=PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
               "--host_action_env=PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+              # The remote macOS cross-SDK used by Bazel currently misses frameworks
+              # needed by the screen recording stack, so keep macOS build actions local.
+              "--strategy=local"
             )
             if [[ -n "${DEVELOPER_DIR:-}" ]]; then
               bazel_args+=(
@@ -230,7 +233,12 @@ jobs:
             fi
           fi
 
-          if [[ -n "${BUILDBUDDY_API_KEY:-}" ]]; then
+          use_remote_bazel=false
+          if [[ -n "${BUILDBUDDY_API_KEY:-}" && "${RUNNER_OS:-}" != "macOS" ]]; then
+            use_remote_bazel=true
+          fi
+
+          if [[ "${use_remote_bazel}" == "true" ]]; then
             echo "BuildBuddy API key is available; using remote Bazel configuration."
             # Work around Bazel 9 remote repo contents cache / overlay materialization failures
             # seen in CI (for example "is not a symlink" or permission errors while
@@ -248,7 +256,11 @@ jobs:
             bazel_status=${PIPESTATUS[0]}
             set -e
           else
-            echo "BuildBuddy API key is not available; using local Bazel configuration."
+            if [[ -n "${BUILDBUDDY_API_KEY:-}" && "${RUNNER_OS:-}" == "macOS" ]]; then
+              echo "BuildBuddy API key is available, but macOS recording dependencies need local Bazel builds; disabling remote services."
+            else
+              echo "BuildBuddy API key is not available; using local Bazel configuration."
+            fi
             # Keep fork/community PRs on Bazel but disable remote services that are
             # configured in .bazelrc and require auth.
             #

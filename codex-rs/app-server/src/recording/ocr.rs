@@ -2,7 +2,7 @@ use image::RgbaImage;
 use std::io;
 use std::sync::Arc;
 
-#[cfg_attr(test, allow(dead_code))]
+#[cfg_attr(any(test, not(target_os = "macos")), allow(dead_code))]
 pub(crate) struct OcrInput<'a> {
     pub(crate) frame: &'a RgbaImage,
 }

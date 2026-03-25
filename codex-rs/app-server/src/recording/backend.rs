@@ -36,6 +36,7 @@ pub(crate) struct DisplayGeometry {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CaptureBackendFailureKind {
     Unsupported,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     PermissionRequired,
     Other,
 }
@@ -56,6 +57,7 @@ impl CaptureBackendFailure {
         }
     }
 
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) fn permission_required(message: impl Into<String>) -> Self {
         Self {
             kind: CaptureBackendFailureKind::PermissionRequired,

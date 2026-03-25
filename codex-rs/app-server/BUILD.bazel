@@ -1,7 +1,29 @@
+load("@crates//:data.bzl", "DEP_DATA")
 load("//:defs.bzl", "codex_rust_crate")
+
+_MACOS_RECORDING_DEPS = select({
+    "@platforms//os:macos": [
+        "@crates//:muxide-0.2.0",
+        "@crates//:objc2-0.6.4",
+        "@crates//:objc2-core-foundation-0.3.2",
+        "@crates//:objc2-core-graphics-0.3.2",
+        "@crates//:objc2-core-media-0.3.2",
+        "@crates//:objc2-core-video-0.3.2",
+        "@crates//:objc2-foundation-0.3.2",
+        "@crates//:objc2-video-toolbox-0.3.2",
+        "@crates//:objc2-vision-0.3.2",
+        "@crates//:xcap-0.9.3",
+    ],
+    "//conditions:default": [],
+})
+
+_APP_SERVER_DEPS = DEP_DATA["codex-rs/app-server"]["deps"] + _MACOS_RECORDING_DEPS
+_APP_SERVER_TEST_DEPS = _APP_SERVER_DEPS + DEP_DATA["codex-rs/app-server"]["dev_deps"]
 
 codex_rust_crate(
     name = "app-server",
     crate_name = "codex_app_server",
+    deps_override = _APP_SERVER_DEPS,
     test_tags = ["no-sandbox"],
+    test_deps_override = _APP_SERVER_TEST_DEPS,
 )

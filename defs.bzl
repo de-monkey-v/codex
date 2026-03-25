@@ -100,6 +100,9 @@ def codex_rust_crate(
         rustc_flags_extra = [],
         rustc_env = {},
         deps_extra = [],
+        deps_override = None,
+        test_deps_override = None,
+        build_deps_override = None,
         integration_compile_data_extra = [],
         test_data_extra = [],
         test_tags = [],
@@ -130,6 +133,12 @@ def codex_rust_crate(
         rustc_env: Extra rustc_env entries to merge with defaults.
         deps_extra: Extra normal deps beyond @crates resolution.
             Typically only needed when features add additional deps.
+        deps_override: Optional full normal dependency list to use instead of
+            `all_crate_deps()`.
+        test_deps_override: Optional full normal+dev dependency list to use
+            instead of `all_crate_deps(normal = True, normal_dev = True)`.
+        build_deps_override: Optional full build dependency list to use instead
+            of `all_crate_deps(build = True)`.
         integration_compile_data_extra: Extra compile_data for integration tests.
         test_data_extra: Extra runtime data for tests.
         test_tags: Tags applied to unit + integration test targets.
@@ -150,6 +159,9 @@ def codex_rust_crate(
     } | rustc_env
 
     binaries = DEP_DATA.get(native.package_name())["binaries"]
+    normal_deps = deps_override if deps_override != None else all_crate_deps()
+    test_deps = test_deps_override if test_deps_override != None else all_crate_deps(normal = True, normal_dev = True)
+    build_deps = build_deps_override if build_deps_override != None else all_crate_deps(build = True)
 
     lib_srcs = crate_srcs or native.glob(["src/**/*.rs"], exclude = binaries.values(), allow_empty = True)
 
@@ -159,7 +171,7 @@ def codex_rust_crate(
         cargo_build_script(
             name = name + "-build-script",
             srcs = ["build.rs"],
-            deps = all_crate_deps(build = True),
+            deps = build_deps,
             data = build_script_data,
             # Some build script deps sniff version-related env vars...
             version = "0.0.0",
@@ -173,7 +185,7 @@ def codex_rust_crate(
             name = name,
             crate_name = crate_name,
             crate_features = crate_features,
-            deps = all_crate_deps() + maybe_deps + deps_extra,
+            deps = normal_deps + maybe_deps + deps_extra,
             compile_data = compile_data,
             data = lib_data_extra,
             srcs = lib_srcs,
@@ -187,7 +199,7 @@ def codex_rust_crate(
         rust_test(
             name = unit_test_binary,
             crate = name,
-            deps = all_crate_deps(normal = True, normal_dev = True) + maybe_deps + deps_extra,
+            deps = test_deps + maybe_deps + deps_extra,
             # Bazel has emitted both `codex-rs/<crate>/...` and
             # `../codex-rs/<crate>/...` paths for `file!()`. Strip either
             # prefix so the workspace-root launcher sees Cargo-like metadata
@@ -222,7 +234,7 @@ def codex_rust_crate(
             name = binary,
             crate_name = binary.replace("-", "_"),
             crate_root = main,
-            deps = all_crate_deps() + maybe_deps + deps_extra,
+            deps = normal_deps + maybe_deps + deps_extra,
             edition = crate_edition,
             rustc_flags = rustc_flags_extra,
             srcs = native.glob(["src/**/*.rs"]),
@@ -248,7 +260,7 @@ def codex_rust_crate(
             srcs = [test],
             data = native.glob(["tests/**"], allow_empty = True) + sanitized_binaries + test_data_extra,
             compile_data = native.glob(["tests/**"], allow_empty = True) + integration_compile_data_extra,
-            deps = all_crate_deps(normal = True, normal_dev = True) + maybe_deps + deps_extra,
+            deps = test_deps + maybe_deps + deps_extra,
             # Bazel has emitted both `codex-rs/<crate>/...` and
             # `../codex-rs/<crate>/...` paths for `file!()`. Strip either
             # prefix so Insta records Cargo-like metadata such as `core/tests/...`.

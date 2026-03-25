@@ -115,9 +115,9 @@ fn request_permissions_tool_is_under_development() {
 }
 
 #[test]
-fn tool_suggest_is_under_development() {
-    assert_eq!(Feature::ToolSuggest.stage(), Stage::UnderDevelopment);
-    assert_eq!(Feature::ToolSuggest.default_enabled(), false);
+fn tool_suggest_is_stable_and_enabled_by_default() {
+    assert_eq!(Feature::ToolSuggest.stage(), Stage::Stable);
+    assert_eq!(Feature::ToolSuggest.default_enabled(), true);
 }
 
 #[test]
@@ -142,6 +142,12 @@ fn image_generation_is_under_development() {
 fn screen_recording_is_under_development() {
     assert_eq!(Feature::ScreenRecording.stage(), Stage::UnderDevelopment);
     assert_eq!(Feature::ScreenRecording.default_enabled(), false);
+}
+
+#[test]
+fn tool_call_mcp_elicitation_is_stable_and_enabled_by_default() {
+    assert_eq!(Feature::ToolCallMcpElicitation.stage(), Stage::Stable);
+    assert_eq!(Feature::ToolCallMcpElicitation.default_enabled(), true);
 }
 
 #[test]
