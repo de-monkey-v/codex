@@ -1,5 +1,6 @@
 ---
 source: tui/src/chatwidget/tests.rs
+assertion_line: 3480
 expression: "format!(\"{buf:?}\")"
 ---
 Buffer {
@@ -21,19 +22,21 @@ Buffer {
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 2, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
-        x: 46, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 10, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: ITALIC,
-        x: 73, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 2, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: ITALIC,
-        x: 7, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 4, y: 7, fg: Rgb(137, 180, 250), bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 7, fg: Rgb(205, 214, 244), bg: Reset, underline: Reset, modifier: NONE,
-        x: 20, y: 7, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 0, y: 9, fg: Cyan, bg: Reset, underline: Reset, modifier: BOLD,
-        x: 21, y: 9, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 48, y: 10, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
-        x: 51, y: 10, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 1, fg: Black, bg: Gray, underline: Reset, modifier: NONE,
+        x: 2, y: 2, fg: Black, bg: Gray, underline: Reset, modifier: BOLD,
+        x: 46, y: 2, fg: Black, bg: Gray, underline: Reset, modifier: NONE,
+        x: 10, y: 4, fg: Black, bg: Gray, underline: Reset, modifier: ITALIC,
+        x: 73, y: 4, fg: Black, bg: Gray, underline: Reset, modifier: NONE,
+        x: 2, y: 5, fg: Black, bg: Gray, underline: Reset, modifier: ITALIC,
+        x: 7, y: 5, fg: Black, bg: Gray, underline: Reset, modifier: NONE,
+        x: 4, y: 7, fg: Rgb(137, 180, 250), bg: Gray, underline: Reset, modifier: NONE,
+        x: 8, y: 7, fg: Rgb(205, 214, 244), bg: Gray, underline: Reset, modifier: NONE,
+        x: 20, y: 7, fg: Black, bg: Gray, underline: Reset, modifier: NONE,
+        x: 0, y: 9, fg: Cyan, bg: Gray, underline: Reset, modifier: BOLD,
+        x: 21, y: 9, fg: Black, bg: Gray, underline: Reset, modifier: NONE,
+        x: 48, y: 10, fg: Black, bg: Gray, underline: Reset, modifier: DIM,
+        x: 51, y: 10, fg: Black, bg: Gray, underline: Reset, modifier: NONE,
+        x: 0, y: 12, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 2, y: 12, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
     ]
 }

@@ -1,6 +1,6 @@
 ---
 source: tui/src/chatwidget/tests.rs
-assertion_line: 9085
+assertion_line: 10531
 expression: term.backend().vt100().screen().contents()
 ---
 
@@ -19,7 +19,7 @@ expression: term.backend().vt100().screen().contents()
 
 • Working (0s • esc to interrupt)
 
-
+ 
 › Ask Codex to do anything
-
+ 
   ? for shortcuts                                                                                                        100% context left

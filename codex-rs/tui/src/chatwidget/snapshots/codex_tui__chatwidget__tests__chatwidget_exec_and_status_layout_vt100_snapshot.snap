@@ -1,5 +1,6 @@
 ---
 source: tui/src/chatwidget/tests.rs
+assertion_line: 12327
 expression: term.backend().vt100().screen().contents()
 ---
 
@@ -38,7 +39,7 @@ expression: term.backend().vt100().screen().contents()
 
 • Investigating rendering code (0s • esc to interrupt)
 
-
+ 
 › Summarize recent commits
-
+ 
   tab to queue message                                       100% context left
