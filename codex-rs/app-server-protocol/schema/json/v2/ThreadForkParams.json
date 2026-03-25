@@ -127,7 +127,9 @@
       "type": "boolean"
     },
     "metadata": {
-      "additionalProperties": true,
+      "additionalProperties": {
+        "type": "string"
+      },
       "type": [
         "object",
         "null"

@@ -77,8 +77,8 @@ async fn thread_fork_creates_new_thread_and_emits_started() -> Result<()> {
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
 
     let metadata = BTreeMap::from([
-        ("clientTag".to_string(), json!("forked")),
-        ("pinned".to_string(), json!(false)),
+        ("clientTag".to_string(), "forked".to_string()),
+        ("pinned".to_string(), "false".to_string()),
     ]);
     let fork_id = mcp
         .send_thread_fork_request(ThreadForkParams {

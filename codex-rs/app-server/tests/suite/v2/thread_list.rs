@@ -3,8 +3,10 @@ use app_test_support::McpProcess;
 use app_test_support::create_fake_rollout;
 use app_test_support::create_fake_rollout_with_source;
 use app_test_support::create_final_assistant_message_sse_response;
+use app_test_support::create_mock_responses_server_repeating_assistant;
 use app_test_support::create_mock_responses_server_sequence;
 use app_test_support::rollout_path;
+use app_test_support::set_rollout_metadata;
 use app_test_support::to_response;
 use chrono::DateTime;
 use chrono::Utc;
@@ -32,6 +34,7 @@ use codex_protocol::protocol::SubAgentSource;
 use core_test_support::responses;
 use pretty_assertions::assert_eq;
 use std::cmp::Reverse;
+use std::collections::BTreeMap;
 use std::fs;
 use std::fs::FileTimes;
 use std::fs::OpenOptions;
@@ -185,6 +188,43 @@ async fn thread_list_basic_empty() -> Result<()> {
 }
 
 #[tokio::test]
+async fn thread_list_reads_metadata_from_rollout_without_sqlite() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    create_minimal_config(codex_home.path())?;
+
+    let thread_id = create_fake_rollout(
+        codex_home.path(),
+        "2025-01-02T12-00-00",
+        "2025-01-02T12:00:00Z",
+        "Hello",
+        Some("mock_provider"),
+        None,
+    )?;
+    let metadata = BTreeMap::from([("clientTag".to_string(), "rollout".to_string())]);
+    let path = rollout_path(codex_home.path(), "2025-01-02T12-00-00", &thread_id);
+    set_rollout_metadata(path.as_path(), metadata.clone())?;
+
+    let mut mcp = init_mcp(codex_home.path()).await?;
+    let ThreadListResponse { data, .. } = list_threads(
+        &mut mcp,
+        None,
+        Some(10),
+        Some(vec!["mock_provider".to_string()]),
+        None,
+        None,
+    )
+    .await?;
+
+    let listed = data
+        .into_iter()
+        .find(|candidate| candidate.id == thread_id)
+        .expect("expected stored thread to be listed");
+    assert_eq!(listed.metadata, metadata);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn thread_list_reports_system_error_idle_flag_after_failed_turn() -> Result<()> {
     let responses = vec![
         create_final_assistant_message_sse_response("seeded")?,
@@ -308,6 +348,107 @@ stream_max_retries = 0
 "#
         ),
     )
+}
+
+fn create_runtime_sqlite_config(
+    codex_home: &std::path::Path,
+    server_uri: &str,
+) -> std::io::Result<()> {
+    let config_toml = codex_home.join("config.toml");
+    std::fs::write(
+        config_toml,
+        format!(
+            r#"
+model = "mock-model"
+approval_policy = "never"
+sandbox_mode = "read-only"
+
+model_provider = "mock_provider"
+suppress_unstable_features_warning = true
+
+[features]
+sqlite = true
+
+[model_providers.mock_provider]
+name = "Mock provider for test"
+base_url = "{server_uri}/v1"
+wire_api = "responses"
+request_max_retries = 0
+stream_max_retries = 0
+"#
+        ),
+    )
+}
+
+#[tokio::test]
+async fn thread_list_prefers_sqlite_metadata_over_rollout_metadata() -> Result<()> {
+    let server = create_mock_responses_server_repeating_assistant("Done").await;
+    let codex_home = TempDir::new()?;
+    create_runtime_sqlite_config(codex_home.path(), &server.uri())?;
+
+    let mut mcp = init_mcp(codex_home.path()).await?;
+    let expected_metadata = BTreeMap::from([("clientTag".to_string(), "sqlite".to_string())]);
+
+    let start_id = mcp
+        .send_thread_start_request(ThreadStartParams {
+            metadata: Some(expected_metadata.clone()),
+            ..Default::default()
+        })
+        .await?;
+    let start_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(start_id)),
+    )
+    .await??;
+    let ThreadStartResponse { thread, .. } = to_response::<ThreadStartResponse>(start_resp)?;
+    let rollout_path = thread
+        .path
+        .expect("persistent thread should expose a rollout path");
+
+    let turn_id = mcp
+        .send_turn_start_request(TurnStartParams {
+            thread_id: thread.id.clone(),
+            input: vec![UserInput::Text {
+                text: "seed history".to_string(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
+    let turn_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(turn_id)),
+    )
+    .await??;
+    let _: TurnStartResponse = to_response::<TurnStartResponse>(turn_resp)?;
+    timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_notification_message("turn/completed"),
+    )
+    .await??;
+
+    set_rollout_metadata(
+        rollout_path.as_path(),
+        BTreeMap::from([("clientTag".to_string(), "rollout".to_string())]),
+    )?;
+
+    let ThreadListResponse { data, .. } = list_threads(
+        &mut mcp,
+        None,
+        Some(10),
+        Some(vec!["mock_provider".to_string()]),
+        None,
+        None,
+    )
+    .await?;
+
+    let listed = data
+        .into_iter()
+        .find(|candidate| candidate.id == thread.id)
+        .expect("expected started thread to be listed");
+    assert_eq!(listed.metadata, expected_metadata);
+
+    Ok(())
 }
 
 #[tokio::test]

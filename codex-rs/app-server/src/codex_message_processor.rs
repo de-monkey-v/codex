@@ -326,6 +326,8 @@ use crate::thread_state::ThreadStateManager;
 
 const THREAD_LIST_DEFAULT_LIMIT: usize = 25;
 const THREAD_LIST_MAX_LIMIT: usize = 100;
+const THREAD_METADATA_MAX_ENTRIES: usize = 16;
+const THREAD_METADATA_MAX_STRING_CHARS: usize = 512;
 
 struct ThreadListFilters {
     model_providers: Option<Vec<String>>,
@@ -1872,6 +1874,13 @@ impl CodexMessageProcessor {
             personality,
         );
         typesafe_overrides.ephemeral = ephemeral;
+        let thread_metadata = match metadata.map(validate_thread_metadata).transpose() {
+            Ok(metadata) => metadata.unwrap_or_default(),
+            Err(message) => {
+                self.send_invalid_request_error(request_id, message).await;
+                return;
+            }
+        };
         let cli_overrides = self.cli_overrides.clone();
         let cloud_requirements = self.current_cloud_requirements();
         let listener_task_context = ListenerTaskContext {
@@ -1894,7 +1903,7 @@ impl CodexMessageProcessor {
                 dynamic_tools,
                 persist_extended_history,
                 service_name,
-                metadata.unwrap_or_default(),
+                thread_metadata,
                 experimental_raw_events,
                 request_trace,
             )
@@ -1960,7 +1969,7 @@ impl CodexMessageProcessor {
         dynamic_tools: Option<Vec<ApiDynamicToolSpec>>,
         persist_extended_history: bool,
         service_name: Option<String>,
-        thread_metadata: BTreeMap<String, serde_json::Value>,
+        thread_metadata: BTreeMap<String, String>,
         experimental_raw_events: bool,
         request_trace: Option<W3cTraceContext>,
     ) {
@@ -2044,6 +2053,29 @@ impl CodexMessageProcessor {
                         otel.name = "app_server.thread_start.config_snapshot",
                     ))
                     .await;
+                if let (Some(state_db_ctx), Some(rollout_path)) =
+                    (thread.state_db(), session_configured.rollout_path.clone())
+                    && let Err(message) = insert_thread_metadata_from_snapshot(
+                        &state_db_ctx,
+                        thread_id,
+                        rollout_path,
+                        &config_snapshot,
+                    )
+                    .await
+                {
+                    listener_task_context
+                        .outgoing
+                        .send_error(
+                            request_id,
+                            JSONRPCErrorError {
+                                code: INTERNAL_ERROR_CODE,
+                                message,
+                                data: None,
+                            },
+                        )
+                        .await;
+                    return;
+                }
                 let mut thread = build_thread_from_snapshot(
                     thread_id,
                     &config_snapshot,
@@ -2386,8 +2418,25 @@ impl CodexMessageProcessor {
     ) {
         let ThreadMetadataUpdateParams {
             thread_id,
+            metadata,
             git_info,
         } = params;
+        let metadata = match metadata.map(validate_thread_metadata).transpose() {
+            Ok(metadata) => metadata,
+            Err(message) => {
+                self.send_invalid_request_error(request_id, message).await;
+                return;
+            }
+        };
+
+        if metadata.is_none() && git_info.is_none() {
+            self.send_invalid_request_error(
+                request_id,
+                "metadata or gitInfo must include at least one field".to_string(),
+            )
+            .await;
+            return;
+        }
 
         let thread_uuid = match ThreadId::from_string(&thread_id) {
             Ok(id) => id,
@@ -2398,24 +2447,20 @@ impl CodexMessageProcessor {
             }
         };
 
-        let Some(ThreadMetadataGitInfoUpdateParams {
-            sha,
-            branch,
-            origin_url,
-        }) = git_info
-        else {
-            self.send_invalid_request_error(
-                request_id,
-                "gitInfo must include at least one field".to_string(),
+        let (sha, branch, origin_url) = git_info
+            .map(
+                |ThreadMetadataGitInfoUpdateParams {
+                     sha,
+                     branch,
+                     origin_url,
+                 }| (sha, branch, origin_url),
             )
-            .await;
-            return;
-        };
+            .unwrap_or((None, None, None));
 
-        if sha.is_none() && branch.is_none() && origin_url.is_none() {
+        if metadata.is_none() && sha.is_none() && branch.is_none() && origin_url.is_none() {
             self.send_invalid_request_error(
                 request_id,
-                "gitInfo must include at least one field".to_string(),
+                "metadata or gitInfo must include at least one field".to_string(),
             )
             .await;
             return;
@@ -2492,32 +2537,70 @@ impl CodexMessageProcessor {
             None => None,
         };
 
-        let updated = match state_db_ctx
-            .update_thread_git_info(
-                thread_uuid,
-                git_sha.as_ref().map(|value| value.as_deref()),
-                git_branch.as_ref().map(|value| value.as_deref()),
-                git_origin_url.as_ref().map(|value| value.as_deref()),
-            )
-            .await
-        {
-            Ok(updated) => updated,
-            Err(err) => {
+        if let Some(metadata) = metadata.as_ref() {
+            let metadata_json = match serde_json::to_string(metadata) {
+                Ok(metadata_json) => metadata_json,
+                Err(err) => {
+                    self.send_internal_error(
+                        request_id,
+                        format!("failed to serialize thread metadata for {thread_uuid}: {err}"),
+                    )
+                    .await;
+                    return;
+                }
+            };
+            let updated = match state_db_ctx
+                .update_thread_metadata_json(thread_uuid, metadata_json.as_str())
+                .await
+            {
+                Ok(updated) => updated,
+                Err(err) => {
+                    self.send_internal_error(
+                        request_id,
+                        format!("failed to update thread metadata for {thread_uuid}: {err}"),
+                    )
+                    .await;
+                    return;
+                }
+            };
+            if !updated {
                 self.send_internal_error(
                     request_id,
-                    format!("failed to update thread metadata for {thread_uuid}: {err}"),
+                    format!("thread metadata disappeared before update completed: {thread_uuid}"),
                 )
                 .await;
                 return;
             }
-        };
-        if !updated {
-            self.send_internal_error(
-                request_id,
-                format!("thread metadata disappeared before update completed: {thread_uuid}"),
-            )
-            .await;
-            return;
+        }
+
+        if git_sha.is_some() || git_branch.is_some() || git_origin_url.is_some() {
+            let updated = match state_db_ctx
+                .update_thread_git_info(
+                    thread_uuid,
+                    git_sha.as_ref().map(|value| value.as_deref()),
+                    git_branch.as_ref().map(|value| value.as_deref()),
+                    git_origin_url.as_ref().map(|value| value.as_deref()),
+                )
+                .await
+            {
+                Ok(updated) => updated,
+                Err(err) => {
+                    self.send_internal_error(
+                        request_id,
+                        format!("failed to update thread metadata for {thread_uuid}: {err}"),
+                    )
+                    .await;
+                    return;
+                }
+            };
+            if !updated {
+                self.send_internal_error(
+                    request_id,
+                    format!("thread metadata disappeared before update completed: {thread_uuid}"),
+                )
+                .await;
+                return;
+            }
         }
 
         let Some(summary) =
@@ -2606,25 +2689,15 @@ impl CodexMessageProcessor {
             }
 
             let config_snapshot = thread.config_snapshot().await;
-            let model_provider = config_snapshot.model_provider_id.clone();
-            let mut builder = ThreadMetadataBuilder::new(
+            if let Err(message) = insert_thread_metadata_from_snapshot(
+                state_db_ctx,
                 thread_uuid,
                 rollout_path,
-                Utc::now(),
-                config_snapshot.session_source.clone(),
-            );
-            builder.model_provider = Some(model_provider.clone());
-            builder.cwd = config_snapshot.cwd.clone();
-            builder.cli_version = Some(env!("CARGO_PKG_VERSION").to_string());
-            builder.sandbox_policy = config_snapshot.sandbox_policy.clone();
-            builder.approval_mode = config_snapshot.approval_policy;
-            builder.metadata_json = serde_json::to_string(&config_snapshot.metadata)
-                .unwrap_or_else(|_| "{}".to_string());
-            let metadata = builder.build(model_provider.as_str());
-            if let Err(err) = state_db_ctx.insert_thread_if_absent(&metadata).await {
-                return Err(internal_error(format!(
-                    "failed to create thread metadata for {thread_uuid}: {err}"
-                )));
+                &config_snapshot,
+            )
+            .await
+            {
+                return Err(internal_error(message));
             }
             return Ok(());
         }
@@ -3237,13 +3310,26 @@ impl CodexMessageProcessor {
                 };
         }
 
-        if include_turns && rollout_path.is_none() && db_summary.is_some() {
-            self.send_internal_error(
-                request_id,
-                format!("failed to locate rollout for thread {thread_uuid}"),
-            )
-            .await;
-            return;
+        if include_turns && rollout_path.is_none() {
+            if let Some(thread) = loaded_thread.as_ref() {
+                let message = if thread.rollout_path().is_some() {
+                    format!(
+                        "thread {thread_uuid} is not materialized yet; includeTurns is unavailable before first user message"
+                    )
+                } else {
+                    "ephemeral threads do not support includeTurns".to_string()
+                };
+                self.send_invalid_request_error(request_id, message).await;
+                return;
+            }
+            if db_summary.is_some() {
+                self.send_internal_error(
+                    request_id,
+                    format!("failed to locate rollout for thread {thread_uuid}"),
+                )
+                .await;
+                return;
+            }
         }
 
         let mut thread = if let Some(summary) = db_summary {
@@ -4016,6 +4102,13 @@ impl CodexMessageProcessor {
             /*personality*/ None,
         );
         typesafe_overrides.ephemeral = ephemeral.then_some(true);
+        let thread_metadata = match metadata.map(validate_thread_metadata).transpose() {
+            Ok(metadata) => metadata.unwrap_or_default(),
+            Err(message) => {
+                self.send_invalid_request_error(request_id, message).await;
+                return;
+            }
+        };
         // Derive a Config using the same logic as new conversation, honoring overrides if provided.
         let cloud_requirements = self.current_cloud_requirements();
         let config = match derive_config_for_cwd(
@@ -4052,7 +4145,7 @@ impl CodexMessageProcessor {
                 rollout_path.clone(),
                 persist_extended_history,
                 self.request_trace_context(&request_id).await,
-                metadata.unwrap_or_default(),
+                thread_metadata.clone(),
             )
             .await
         {
@@ -4080,6 +4173,23 @@ impl CodexMessageProcessor {
                 return;
             }
         };
+        if let (Some(state_db_ctx), Some(rollout_path)) = (
+            forked_thread.state_db(),
+            session_configured.rollout_path.clone(),
+        ) {
+            let config_snapshot = forked_thread.config_snapshot().await;
+            if let Err(message) = insert_thread_metadata_from_snapshot(
+                &state_db_ctx,
+                thread_id,
+                rollout_path,
+                &config_snapshot,
+            )
+            .await
+            {
+                self.send_internal_error(request_id, message).await;
+                return;
+            }
+        }
 
         // Auto-attach a conversation listener when forking a thread.
         Self::log_listener_attach_result(
@@ -4150,6 +4260,7 @@ impl CodexMessageProcessor {
             }
             thread
         };
+        thread.metadata = thread_metadata;
 
         if let Some(fork_rollout_path) = session_configured.rollout_path.as_ref()
             && let Err(message) = populate_thread_turns(
@@ -7936,6 +8047,12 @@ async fn summary_from_thread_list_item(
     state_db_ctx: Option<&StateDbHandle>,
 ) -> Option<ConversationSummary> {
     if let Some(thread_id) = it.thread_id {
+        if let Some(summary) =
+            read_summary_from_state_db_context_by_thread_id(state_db_ctx, thread_id).await
+        {
+            return Some(summary);
+        }
+
         let timestamp = it.created_at.clone();
         let updated_at = it.updated_at.clone().or_else(|| timestamp.clone());
         let model_provider = it
@@ -8007,7 +8124,7 @@ fn summary_from_state_db_metadata(
     source: String,
     agent_nickname: Option<String>,
     agent_role: Option<String>,
-    metadata: BTreeMap<String, serde_json::Value>,
+    metadata: BTreeMap<String, String>,
     git_sha: Option<String>,
     git_branch: Option<String>,
     git_origin_url: Option<String>,
@@ -8380,8 +8497,59 @@ pub(crate) fn summary_to_thread(summary: ConversationSummary) -> Thread {
     }
 }
 
-fn parse_thread_metadata_json(metadata_json: &str) -> BTreeMap<String, serde_json::Value> {
+fn parse_thread_metadata_json(metadata_json: &str) -> BTreeMap<String, String> {
     serde_json::from_str(metadata_json).unwrap_or_default()
+}
+
+async fn insert_thread_metadata_from_snapshot(
+    state_db_ctx: &Arc<StateRuntime>,
+    thread_id: ThreadId,
+    rollout_path: PathBuf,
+    config_snapshot: &ThreadConfigSnapshot,
+) -> std::result::Result<(), String> {
+    let model_provider = config_snapshot.model_provider_id.clone();
+    let mut builder = ThreadMetadataBuilder::new(
+        thread_id,
+        rollout_path,
+        Utc::now(),
+        config_snapshot.session_source.clone(),
+    );
+    builder.model_provider = Some(model_provider.clone());
+    builder.cwd = config_snapshot.cwd.clone();
+    builder.cli_version = Some(env!("CARGO_PKG_VERSION").to_string());
+    builder.sandbox_policy = config_snapshot.sandbox_policy.clone();
+    builder.approval_mode = config_snapshot.approval_policy;
+    builder.metadata_json =
+        serde_json::to_string(&config_snapshot.metadata).unwrap_or_else(|_| "{}".to_string());
+    let metadata = builder.build(model_provider.as_str());
+    state_db_ctx
+        .insert_thread_if_absent(&metadata)
+        .await
+        .map(|_| ())
+        .map_err(|err| format!("failed to create thread metadata for {thread_id}: {err}"))
+}
+
+fn validate_thread_metadata(
+    metadata: BTreeMap<String, String>,
+) -> std::result::Result<BTreeMap<String, String>, String> {
+    if metadata.len() > THREAD_METADATA_MAX_ENTRIES {
+        return Err(format!(
+            "metadata must contain at most {THREAD_METADATA_MAX_ENTRIES} entries"
+        ));
+    }
+    for (key, value) in &metadata {
+        if key.chars().count() > THREAD_METADATA_MAX_STRING_CHARS {
+            return Err(format!(
+                "metadata keys must be at most {THREAD_METADATA_MAX_STRING_CHARS} chars"
+            ));
+        }
+        if value.chars().count() > THREAD_METADATA_MAX_STRING_CHARS {
+            return Err(format!(
+                "metadata values must be at most {THREAD_METADATA_MAX_STRING_CHARS} chars"
+            ));
+        }
+    }
+    Ok(metadata)
 }
 
 #[cfg(test)]

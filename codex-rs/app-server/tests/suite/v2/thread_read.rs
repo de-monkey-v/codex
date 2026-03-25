@@ -2,6 +2,8 @@ use anyhow::Result;
 use app_test_support::McpProcess;
 use app_test_support::create_fake_rollout_with_text_elements;
 use app_test_support::create_mock_responses_server_repeating_assistant;
+use app_test_support::rollout_path;
+use app_test_support::set_rollout_metadata;
 use app_test_support::to_response;
 use codex_app_server_protocol::JSONRPCError;
 use codex_app_server_protocol::JSONRPCResponse;
@@ -29,7 +31,6 @@ use codex_protocol::user_input::TextElement;
 use core_test_support::responses;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
-use serde_json::json;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::path::PathBuf;
@@ -61,6 +62,10 @@ async fn thread_read_returns_summary_without_turns() -> Result<()> {
         Some("mock_provider"),
         None,
     )?;
+    let metadata = BTreeMap::from([("clientTag".to_string(), "rollout".to_string())]);
+    let rollout_file_path =
+        rollout_path(codex_home.path(), "2025-01-05T12-00-00", &conversation_id);
+    set_rollout_metadata(rollout_file_path.as_path(), metadata.clone())?;
 
     let mut mcp = McpProcess::new(codex_home.path()).await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
@@ -86,6 +91,7 @@ async fn thread_read_returns_summary_without_turns() -> Result<()> {
     assert_eq!(thread.cwd, PathBuf::from("/"));
     assert_eq!(thread.cli_version, "0.0.0");
     assert_eq!(thread.source, SessionSource::Cli);
+    assert_eq!(thread.metadata, metadata);
     assert_eq!(thread.git_info, None);
     assert_eq!(thread.turns.len(), 0);
     assert_eq!(thread.status, ThreadStatus::NotLoaded);
@@ -163,7 +169,7 @@ async fn thread_read_loaded_thread_returns_precomputed_path_before_materializati
     let mut mcp = McpProcess::new(codex_home.path()).await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
 
-    let metadata = BTreeMap::from([("clientTag".to_string(), json!("loaded"))]);
+    let metadata = BTreeMap::from([("clientTag".to_string(), "loaded".to_string())]);
     let start_id = mcp
         .send_thread_start_request(ThreadStartParams {
             model: Some("mock-model".to_string()),

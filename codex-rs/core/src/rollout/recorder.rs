@@ -83,7 +83,7 @@ pub enum RolloutRecorderParams {
         forked_from_id: Option<ThreadId>,
         source: SessionSource,
         base_instructions: BaseInstructions,
-        metadata: BTreeMap<String, Value>,
+        metadata: BTreeMap<String, String>,
         dynamic_tools: Vec<DynamicToolSpec>,
         event_persistence_mode: EventPersistenceMode,
     },
@@ -132,7 +132,7 @@ impl RolloutRecorderParams {
         forked_from_id: Option<ThreadId>,
         source: SessionSource,
         base_instructions: BaseInstructions,
-        metadata: BTreeMap<String, Value>,
+        metadata: BTreeMap<String, String>,
         dynamic_tools: Vec<DynamicToolSpec>,
         event_persistence_mode: EventPersistenceMode,
     ) -> Self {
@@ -1041,7 +1041,7 @@ impl From<codex_state::ThreadsPage> for ThreadsPage {
     }
 }
 
-fn parse_thread_metadata_json(metadata_json: &str) -> BTreeMap<String, Value> {
+fn parse_thread_metadata_json(metadata_json: &str) -> BTreeMap<String, String> {
     serde_json::from_str(metadata_json).unwrap_or_default()
 }
 

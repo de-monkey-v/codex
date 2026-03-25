@@ -9536,7 +9536,9 @@
           "type": "string"
         },
         "metadata": {
-          "additionalProperties": true,
+          "additionalProperties": {
+            "type": "string"
+          },
           "default": {},
           "description": "Arbitrary client-defined metadata set when the thread was created.",
           "type": "object"
@@ -9730,7 +9732,9 @@
           "type": "boolean"
         },
         "metadata": {
-          "additionalProperties": true,
+          "additionalProperties": {
+            "type": "string"
+          },
           "type": [
             "object",
             "null"
@@ -10676,6 +10680,16 @@
           ],
           "description": "Patch the stored Git metadata for this thread. Omit a field to leave it unchanged, set it to `null` to clear it, or provide a string to replace the stored value."
         },
+        "metadata": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Replace the stored client-defined metadata for this thread.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
         "threadId": {
           "type": "string"
         }
@@ -11238,7 +11252,9 @@
           ]
         },
         "metadata": {
-          "additionalProperties": true,
+          "additionalProperties": {
+            "type": "string"
+          },
           "type": [
             "object",
             "null"

@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use serde_json::Value;
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
@@ -73,8 +72,8 @@ pub struct ThreadItem {
     /// RFC3339 timestamp string for the most recent update (from file mtime).
     /// updated_at is truncated to second precision to match created_at.
     pub updated_at: Option<String>,
-    /// Arbitrary client-defined thread metadata from session metadata.
-    pub metadata: BTreeMap<String, Value>,
+    /// Client-defined thread metadata when populated by a higher layer.
+    pub metadata: BTreeMap<String, String>,
 }
 
 #[allow(dead_code)]
@@ -101,7 +100,7 @@ struct HeadTailSummary {
     cli_version: Option<String>,
     created_at: Option<String>,
     updated_at: Option<String>,
-    metadata: BTreeMap<String, Value>,
+    metadata: BTreeMap<String, String>,
 }
 
 /// Hard cap to bound worst‑case work per request.

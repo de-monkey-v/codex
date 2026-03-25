@@ -42,7 +42,6 @@ use codex_protocol::protocol::TurnAbortedEvent;
 use codex_protocol::protocol::W3cTraceContext;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
-use serde_json::Value;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -452,7 +451,7 @@ impl ThreadManager {
         persist_extended_history: bool,
         metrics_service_name: Option<String>,
         parent_trace: Option<W3cTraceContext>,
-        thread_metadata: BTreeMap<String, Value>,
+        thread_metadata: BTreeMap<String, String>,
     ) -> CodexResult<NewThread> {
         Box::pin(self.state.spawn_thread(
             config,
@@ -644,7 +643,7 @@ impl ThreadManager {
         path: PathBuf,
         persist_extended_history: bool,
         parent_trace: Option<W3cTraceContext>,
-        thread_metadata: BTreeMap<String, Value>,
+        thread_metadata: BTreeMap<String, String>,
     ) -> CodexResult<NewThread>
     where
         S: Into<ForkSnapshot>,
@@ -851,7 +850,7 @@ impl ThreadManagerState {
         initial_history: InitialHistory,
         auth_manager: Arc<AuthManager>,
         agent_control: AgentControl,
-        thread_metadata: BTreeMap<String, Value>,
+        thread_metadata: BTreeMap<String, String>,
         dynamic_tools: Vec<codex_protocol::dynamic_tools::DynamicToolSpec>,
         persist_extended_history: bool,
         metrics_service_name: Option<String>,
@@ -884,7 +883,7 @@ impl ThreadManagerState {
         auth_manager: Arc<AuthManager>,
         agent_control: AgentControl,
         session_source: SessionSource,
-        thread_metadata: BTreeMap<String, Value>,
+        thread_metadata: BTreeMap<String, String>,
         dynamic_tools: Vec<codex_protocol::dynamic_tools::DynamicToolSpec>,
         persist_extended_history: bool,
         metrics_service_name: Option<String>,

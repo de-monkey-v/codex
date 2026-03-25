@@ -50,8 +50,8 @@ async fn thread_start_creates_thread_and_emits_started() -> Result<()> {
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
 
     let metadata = BTreeMap::from([
-        ("clientTag".to_string(), json!("abc")),
-        ("pinned".to_string(), json!(true)),
+        ("clientTag".to_string(), "abc".to_string()),
+        ("pinned".to_string(), "true".to_string()),
     ]);
 
     // Start a v2 thread with an explicit model override.
@@ -159,6 +159,40 @@ async fn thread_start_creates_thread_and_emits_started() -> Result<()> {
         serde_json::from_value(notif.params.expect("params must be present"))?;
     assert_eq!(started.thread.metadata, metadata);
     assert_eq!(started.thread, thread);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn thread_start_rejects_metadata_over_limit() -> Result<()> {
+    let server = create_mock_responses_server_repeating_assistant("Done").await;
+
+    let codex_home = TempDir::new()?;
+    create_config_toml(codex_home.path(), &server.uri())?;
+
+    let mut mcp = McpProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+
+    let metadata = (0..17)
+        .map(|index| (format!("k{index}"), format!("v{index}")))
+        .collect();
+    let req_id = mcp
+        .send_thread_start_request(ThreadStartParams {
+            metadata: Some(metadata),
+            ..Default::default()
+        })
+        .await?;
+
+    let err: JSONRPCError = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_error_message(RequestId::Integer(req_id)),
+    )
+    .await??;
+
+    assert_eq!(
+        err.error.message,
+        "metadata must contain at most 16 entries"
+    );
 
     Ok(())
 }

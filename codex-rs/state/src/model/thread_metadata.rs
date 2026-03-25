@@ -7,7 +7,6 @@ use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::SandboxPolicy;
 use codex_protocol::protocol::SessionSource;
-use serde_json::Value;
 use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
 use std::path::PathBuf;
@@ -435,12 +434,6 @@ impl TryFrom<ThreadRow> for ThreadMetadata {
             metadata_json,
         })
     }
-}
-
-pub(crate) fn metadata_json_from_map(
-    metadata: &std::collections::BTreeMap<String, Value>,
-) -> Result<String> {
-    Ok(serde_json::to_string(metadata)?)
 }
 
 pub(crate) fn anchor_from_item(item: &ThreadMetadata, sort_key: SortKey) -> Option<Anchor> {

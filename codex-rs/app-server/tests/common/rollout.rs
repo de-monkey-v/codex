@@ -1,6 +1,8 @@
 use anyhow::Result;
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::GitInfo;
+use codex_protocol::protocol::RolloutItem;
+use codex_protocol::protocol::RolloutLine;
 use codex_protocol::protocol::SessionMeta;
 use codex_protocol::protocol::SessionMetaLine;
 use codex_protocol::protocol::SessionSource;
@@ -210,4 +212,24 @@ pub fn create_fake_rollout_with_text_elements(
 
     fs::write(file_path, lines.join("\n") + "\n")?;
     Ok(uuid_str)
+}
+
+pub fn set_rollout_metadata(path: &Path, metadata: BTreeMap<String, String>) -> Result<()> {
+    let content = fs::read_to_string(path)?;
+    let mut lines: Vec<String> = content.lines().map(str::to_string).collect();
+    let first_line = lines
+        .first_mut()
+        .ok_or_else(|| anyhow::anyhow!("rollout at {} is empty", path.display()))?;
+    let mut rollout_line: RolloutLine = serde_json::from_str(first_line)?;
+    let RolloutItem::SessionMeta(mut session_meta_line) = rollout_line.item else {
+        return Err(anyhow::anyhow!(
+            "rollout at {} does not start with session metadata",
+            path.display()
+        ));
+    };
+    session_meta_line.meta.metadata = metadata;
+    rollout_line.item = RolloutItem::SessionMeta(session_meta_line);
+    *first_line = serde_json::to_string(&rollout_line)?;
+    fs::write(path, lines.join("\n") + "\n")?;
+    Ok(())
 }

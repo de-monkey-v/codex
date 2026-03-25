@@ -407,7 +407,7 @@ pub(crate) struct CodexSpawnArgs {
     pub(crate) file_watcher: Arc<FileWatcher>,
     pub(crate) conversation_history: InitialHistory,
     pub(crate) session_source: SessionSource,
-    pub(crate) thread_metadata: BTreeMap<String, Value>,
+    pub(crate) thread_metadata: BTreeMap<String, String>,
     pub(crate) agent_control: AgentControl,
     pub(crate) dynamic_tools: Vec<DynamicToolSpec>,
     pub(crate) persist_extended_history: bool,
@@ -1084,7 +1084,7 @@ pub(crate) struct SessionConfiguration {
     codex_home: PathBuf,
     /// Optional user-facing name for the thread, updated during the session.
     thread_name: Option<String>,
-    metadata: BTreeMap<String, Value>,
+    metadata: BTreeMap<String, String>,
 
     // TODO(pakrym): Remove config from here
     original_config_do_not_use: Arc<Config>,
