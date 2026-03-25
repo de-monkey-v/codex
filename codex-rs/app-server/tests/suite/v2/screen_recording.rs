@@ -1,3 +1,4 @@
+use anyhow::Context;
 use anyhow::Result;
 use app_test_support::McpProcess;
 use app_test_support::to_response;
@@ -18,6 +19,8 @@ use codex_app_server_protocol::ScreenRecordingStatusUpdatedNotification;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 use serial_test::serial;
+use std::path::Path;
+use std::path::PathBuf;
 use tempfile::TempDir;
 use tokio::time::Instant;
 use tokio::time::timeout;
@@ -29,6 +32,74 @@ fn write_config(codex_home: &TempDir, contents: &str) -> Result<()> {
         codex_home.path().join("config.toml"),
         contents,
     )?)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial(screen_recording)]
+async fn screen_recording_persists_segment_files_end_to_end() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    write_config(
+        &codex_home,
+        r#"
+[features]
+screen_recording = true
+
+[otel]
+exporter = "none"
+trace_exporter = "none"
+metrics_exporter = "none"
+
+[recording.screen]
+enabled = true
+"#,
+    )?;
+
+    let mut mcp = McpProcess::new_with_env(
+        codex_home.path(),
+        &[("CODEX_SCREEN_RECORDING_FAKE", Some("1"))],
+    )
+    .await?;
+    timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.initialize_with_capabilities(
+            ClientInfo {
+                name: "codex_vscode".to_string(),
+                title: Some("Codex VS Code Extension".to_string()),
+                version: "0.1.0".to_string(),
+            },
+            Some(InitializeCapabilities {
+                experimental_api: true,
+                opt_out_notification_methods: None,
+            }),
+        ),
+    )
+    .await??;
+
+    let running = wait_for_status(&mut mcp, ScreenRecordingState::Running).await?;
+    let (segment_path, manifest_path, manifest) =
+        wait_for_segment_artifacts(running.storage_path.as_path()).await?;
+    let segment_bytes = std::fs::read(&segment_path)?;
+    assert!(!segment_bytes.is_empty());
+    #[cfg(target_os = "macos")]
+    {
+        assert!(segment_bytes.len() >= 8);
+        assert_eq!(segment_bytes[4..8], *b"ftyp");
+    }
+    assert_eq!(
+        manifest
+            .get("display_id")
+            .and_then(serde_json::Value::as_str),
+        Some("fake-display-1")
+    );
+    assert!(
+        manifest
+            .get("frame_count")
+            .and_then(serde_json::Value::as_u64)
+            .is_some_and(|frame_count| frame_count > 0),
+        "expected a non-zero frame_count in {manifest_path:?}: {manifest}"
+    );
+
+    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -411,4 +482,56 @@ fn assert_invalid_request(error: JSONRPCError, message: String) {
     assert_eq!(error.error.code, -32600);
     assert_eq!(error.error.message, message);
     assert_eq!(error.error.data, None);
+}
+
+async fn wait_for_segment_artifacts(
+    storage_root: &Path,
+) -> Result<(PathBuf, PathBuf, serde_json::Value)> {
+    let deadline = Instant::now() + DEFAULT_READ_TIMEOUT;
+    loop {
+        if let Some((segment_path, manifest_path, manifest)) = find_segment_artifacts(storage_root)?
+        {
+            let segment_len = std::fs::metadata(&segment_path)
+                .with_context(|| format!("read metadata for {segment_path:?}"))?
+                .len();
+            let frame_count = manifest
+                .get("frame_count")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0);
+            if segment_len > 0 && frame_count > 0 {
+                return Ok((segment_path, manifest_path, manifest));
+            }
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for screen recording artifacts in {storage_root:?}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+}
+
+fn find_segment_artifacts(
+    storage_root: &Path,
+) -> Result<Option<(PathBuf, PathBuf, serde_json::Value)>> {
+    let mut paths = std::fs::read_dir(storage_root)?
+        .filter_map(std::result::Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "mp4"))
+        .collect::<Vec<_>>();
+    paths.sort();
+
+    for segment_path in paths {
+        let manifest_path = segment_path.with_extension("mp4.json");
+        if !manifest_path.exists() {
+            continue;
+        }
+        let manifest_bytes = std::fs::read(&manifest_path)
+            .with_context(|| format!("read manifest {manifest_path:?}"))?;
+        let manifest = serde_json::from_slice(&manifest_bytes)
+            .with_context(|| format!("parse manifest {manifest_path:?}"))?;
+        return Ok(Some((segment_path, manifest_path, manifest)));
+    }
+
+    Ok(None)
 }
