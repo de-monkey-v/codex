@@ -200,6 +200,36 @@ jobs:
             bazel_args+=("--test_env=CODEX_JS_REPL_NODE_PATH=${node_bin}")
           fi
 
+          if [[ "${RUNNER_OS:-}" == "Linux" ]]; then
+            bazel_args+=(
+              "--action_env=PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+              "--host_action_env=PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+            )
+          elif [[ "${RUNNER_OS:-}" == "macOS" ]]; then
+            bazel_args+=(
+              "--action_env=PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+              "--host_action_env=PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+            )
+            if [[ -n "${DEVELOPER_DIR:-}" ]]; then
+              bazel_args+=(
+                "--action_env=DEVELOPER_DIR=${DEVELOPER_DIR}"
+                "--host_action_env=DEVELOPER_DIR=${DEVELOPER_DIR}"
+              )
+            fi
+            if [[ -n "${PKG_CONFIG:-}" ]]; then
+              bazel_args+=(
+                "--action_env=PKG_CONFIG=${PKG_CONFIG}"
+                "--host_action_env=PKG_CONFIG=${PKG_CONFIG}"
+              )
+            fi
+            if [[ -n "${PKG_CONFIG_PATH:-}" ]]; then
+              bazel_args+=(
+                "--action_env=PKG_CONFIG_PATH=${PKG_CONFIG_PATH}"
+                "--host_action_env=PKG_CONFIG_PATH=${PKG_CONFIG_PATH}"
+              )
+            fi
+          fi
+
           if [[ -n "${BUILDBUDDY_API_KEY:-}" ]]; then
             echo "BuildBuddy API key is available; using remote Bazel configuration."
             # Work around Bazel 9 remote repo contents cache / overlay materialization failures

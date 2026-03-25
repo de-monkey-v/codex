@@ -227,7 +227,11 @@ impl McpProcess {
     ) -> anyhow::Result<JSONRPCMessage> {
         let params = Some(serde_json::to_value(params)?);
         let request_id = self.send_request("initialize", params).await?;
-        let message = self.read_jsonrpc_message().await?;
+        let message = self
+            .read_stream_until_message(|message| {
+                Self::message_request_id(message) == Some(&RequestId::Integer(request_id))
+            })
+            .await?;
         match message {
             JSONRPCMessage::Response(response) => {
                 if response.id != RequestId::Integer(request_id) {
