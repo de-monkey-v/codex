@@ -479,7 +479,7 @@ impl MessageProcessor {
             .await;
     }
 
-    pub(crate) async fn shutdown(&self) {
+    pub(crate) async fn shutdown_threads(&self) {
         self.screen_recording_manager.shutdown().await;
         self.codex_message_processor.shutdown_threads().await;
     }

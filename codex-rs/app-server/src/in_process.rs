@@ -487,7 +487,7 @@ fn start_uninitialized(args: InProcessStartArgs) -> InProcessClientHandle {
             processor.connection_closed(IN_PROCESS_CONNECTION_ID).await;
             processor.clear_all_thread_listeners().await;
             processor.drain_background_tasks().await;
-            processor.shutdown().await;
+            processor.shutdown_threads().await;
         });
         let mut pending_request_responses =
             HashMap::<RequestId, oneshot::Sender<PendingClientRequestResponse>>::new();

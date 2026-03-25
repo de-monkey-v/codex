@@ -159,7 +159,7 @@ impl TracingHarness {
     }
 
     async fn shutdown(self) {
-        self.processor.shutdown().await;
+        self.processor.shutdown_threads().await;
         self.processor.drain_background_tasks().await;
     }
 
