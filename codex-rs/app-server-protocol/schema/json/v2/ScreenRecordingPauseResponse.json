@@ -1,0 +1,116 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AbsolutePathBuf": {
+      "description": "A path that is guaranteed to be absolute and normalized (though it is not guaranteed to be canonicalized or exist on the filesystem).\n\nIMPORTANT: When deserializing an `AbsolutePathBuf`, a base path must be set using [AbsolutePathBufGuard::new]. If no base path is set, the deserialization will fail unless the path being deserialized is already absolute.",
+      "type": "string"
+    },
+    "ScreenRecordingBackend": {
+      "enum": [
+        "xcap"
+      ],
+      "type": "string"
+    },
+    "ScreenRecordingPermission": {
+      "enum": [
+        "unknown",
+        "notRequired",
+        "granted",
+        "denied",
+        "required"
+      ],
+      "type": "string"
+    },
+    "ScreenRecordingPlatform": {
+      "enum": [
+        "macos",
+        "windows",
+        "linux"
+      ],
+      "type": "string"
+    },
+    "ScreenRecordingState": {
+      "enum": [
+        "disabled",
+        "starting",
+        "running",
+        "paused",
+        "error",
+        "unsupported"
+      ],
+      "type": "string"
+    },
+    "ScreenRecordingStatus": {
+      "properties": {
+        "backend": {
+          "$ref": "#/definitions/ScreenRecordingBackend"
+        },
+        "captureFps": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "capturedDisplayCount": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "lastError": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "newestFrameAt": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "paused": {
+          "type": "boolean"
+        },
+        "permission": {
+          "$ref": "#/definitions/ScreenRecordingPermission"
+        },
+        "platform": {
+          "$ref": "#/definitions/ScreenRecordingPlatform"
+        },
+        "retentionHours": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "state": {
+          "$ref": "#/definitions/ScreenRecordingState"
+        },
+        "storagePath": {
+          "$ref": "#/definitions/AbsolutePathBuf"
+        }
+      },
+      "required": [
+        "backend",
+        "captureFps",
+        "capturedDisplayCount",
+        "paused",
+        "permission",
+        "platform",
+        "retentionHours",
+        "state",
+        "storagePath"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "status": {
+      "$ref": "#/definitions/ScreenRecordingStatus"
+    }
+  },
+  "required": [
+    "status"
+  ],
+  "title": "ScreenRecordingPauseResponse",
+  "type": "object"
+}

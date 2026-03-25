@@ -987,16 +987,6 @@ pub(crate) const EXPERIMENTAL_SERVER_NOTIFICATION_METHODS: &[&str] = &[
     "thread/realtime/closed",
 ];
 
-pub(crate) const EXPERIMENTAL_SERVER_NOTIFICATION_PAYLOAD_TYPES: &[&str] = &[
-    "v2::ScreenRecordingStatusUpdatedNotification",
-    "v2::ThreadRealtimeStartedNotification",
-    "v2::ThreadRealtimeItemAddedNotification",
-    "v2::ThreadRealtimeTranscriptUpdatedNotification",
-    "v2::ThreadRealtimeOutputAudioDeltaNotification",
-    "v2::ThreadRealtimeErrorNotification",
-    "v2::ThreadRealtimeClosedNotification",
-];
-
 client_notification_definitions! {
     Initialized,
 }

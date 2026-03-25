@@ -17,7 +17,6 @@ use crate::protocol::common::EXPERIMENTAL_CLIENT_METHOD_PARAM_TYPES;
 use crate::protocol::common::EXPERIMENTAL_CLIENT_METHOD_RESPONSE_TYPES;
 use crate::protocol::common::EXPERIMENTAL_CLIENT_METHODS;
 use crate::protocol::common::EXPERIMENTAL_SERVER_NOTIFICATION_METHODS;
-use crate::protocol::common::EXPERIMENTAL_SERVER_NOTIFICATION_PAYLOAD_TYPES;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::anyhow;
@@ -558,8 +557,6 @@ fn filter_experimental_json_files(out_dir: &Path) -> Result<()> {
         filter_experimental_schema(&mut value)?;
         write_pretty_json(path, &value)?;
     }
-    let experimental_method_types = experimental_method_types();
-    remove_generated_type_files(out_dir, &experimental_method_types, "json")?;
     Ok(())
 }
 
@@ -567,10 +564,6 @@ fn experimental_method_types() -> HashSet<String> {
     let mut type_names = HashSet::new();
     collect_experimental_type_names(EXPERIMENTAL_CLIENT_METHOD_PARAM_TYPES, &mut type_names);
     collect_experimental_type_names(EXPERIMENTAL_CLIENT_METHOD_RESPONSE_TYPES, &mut type_names);
-    collect_experimental_type_names(
-        EXPERIMENTAL_SERVER_NOTIFICATION_PAYLOAD_TYPES,
-        &mut type_names,
-    );
     type_names
 }
 
