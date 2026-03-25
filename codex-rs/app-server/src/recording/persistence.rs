@@ -429,20 +429,19 @@ fn segment_path_for_manifest(manifest_path: &Path) -> Option<PathBuf> {
 }
 
 fn latest_frame_path_for_segment(manifest_path: &Path) -> PathBuf {
-    let segment_path = segment_path_for_manifest(manifest_path)
-        .expect("manifest path should always have a matching segment path");
-    segment_path.with_file_name(format!(
-        "{}-latest.jpg",
-        segment_path
-            .file_stem()
-            .and_then(|name| name.to_str())
-            .expect("segment path should have a valid utf8 stem")
-    ))
+    let Some(segment_path) = segment_path_for_manifest(manifest_path) else {
+        panic!("manifest path should always have a matching segment path");
+    };
+    let Some(segment_stem) = segment_path.file_stem().and_then(|name| name.to_str()) else {
+        panic!("segment path should have a valid utf8 stem");
+    };
+    segment_path.with_file_name(format!("{segment_stem}-latest.jpg",))
 }
 
 fn ocr_path_for_segment(manifest_path: &Path) -> PathBuf {
-    let segment_path = segment_path_for_manifest(manifest_path)
-        .expect("manifest path should always have a matching segment path");
+    let Some(segment_path) = segment_path_for_manifest(manifest_path) else {
+        panic!("manifest path should always have a matching segment path");
+    };
     segment_path.with_extension(OCR_FILE_EXTENSION)
 }
 
