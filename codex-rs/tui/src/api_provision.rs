@@ -42,12 +42,15 @@ pub(crate) fn start_command(
     })?;
 
     let options = ApiProvisionOptions::default();
-    let callback_port = options.callback_port;
     let session = start_api_provisioning(options)
         .map_err(|err| format!("Failed to start API provisioning: {err}"))?;
-    let _ = session.open_browser();
-    let start_message =
-        continue_in_browser_message(session.auth_url(), &dotenv_path, callback_port);
+    let browser_opened = session.open_browser();
+    let start_message = continue_in_browser_message(
+        session.auth_url(),
+        session.callback_port(),
+        &dotenv_path,
+        browser_opened,
+    );
 
     let app_event_tx_for_task = app_event_tx;
     let dotenv_path_for_task = dotenv_path;
@@ -79,8 +82,9 @@ fn existing_shell_api_key_message() -> PlainHistoryCell {
 
 fn continue_in_browser_message(
     auth_url: &str,
-    dotenv_path: &Path,
     callback_port: u16,
+    dotenv_path: &Path,
+    browser_opened: bool,
 ) -> PlainHistoryCell {
     let mut lines = vec![
         vec![
@@ -91,9 +95,17 @@ fn continue_in_browser_message(
         "".into(),
     ];
 
-    lines.push(
-        "  If the link doesn't open automatically, open the following link to authenticate:".into(),
-    );
+    if browser_opened {
+        lines.push("  Codex tried to open this link for you.".dark_gray().into());
+    } else {
+        lines.push(
+            "  Codex couldn't auto-open your browser, but the provisioning flow is still waiting."
+                .dark_gray()
+                .into(),
+        );
+    }
+    lines.push("".into());
+    lines.push("  Open the following link to authenticate:".into());
     lines.push("".into());
     lines.push(Line::from(vec![
         "  ".into(),
@@ -111,7 +123,7 @@ fn continue_in_browser_message(
     lines.push("".into());
     lines.push(
         format!(
-            "  On a remote or headless machine, forward localhost:{callback_port} to this Codex host before opening the link."
+            "  On a remote or headless machine, forward localhost:{callback_port} back to this Codex host before opening the link."
         )
         .dark_gray()
         .into(),
@@ -265,8 +277,9 @@ mod tests {
     fn continue_in_browser_message_snapshot() {
         let cell = continue_in_browser_message(
             "https://auth.openai.com/oauth/authorize?client_id=abc",
-            Path::new("/tmp/workspace/.env.local"),
             /*callback_port*/ 5000,
+            Path::new("/tmp/workspace/.env.local"),
+            /*browser_opened*/ false,
         );
 
         assert_snapshot!(render_cell(&cell));
@@ -279,6 +292,20 @@ mod tests {
         assert_eq!(
             render_cell(&cell),
             "• OPENAI_API_KEY is already set in this Codex session; skipping API provisioning. This Codex session already inherited OPENAI_API_KEY from its shell environment. Unset it and run /api-provision again if you want Codex to provision and save a different key."
+        );
+    }
+
+    #[test]
+    fn continue_in_browser_message_always_includes_the_auth_url() {
+        let cell = continue_in_browser_message(
+            "https://auth.example.com/oauth/authorize?state=abc",
+            5000,
+            Path::new("/tmp/workspace/.env.local"),
+            /*browser_opened*/ false,
+        );
+
+        assert!(
+            render_cell(&cell).contains("https://auth.example.com/oauth/authorize?state=abc")
         );
     }
 

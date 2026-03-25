@@ -110,6 +110,67 @@ impl LoginServer {
     }
 }
 
+/// Handle for a running authorization-code callback server.
+pub(crate) struct AuthorizationCodeServer {
+    pub auth_url: String,
+    pub actual_port: u16,
+    pub redirect_uri: String,
+    code_verifier: String,
+    server_handle: tokio::task::JoinHandle<io::Result<String>>,
+    shutdown_handle: ShutdownHandle,
+}
+
+impl AuthorizationCodeServer {
+    pub fn open_browser(&self) -> bool {
+        webbrowser::open(&self.auth_url).is_ok()
+    }
+
+    pub fn open_browser_or_print(&self) -> bool {
+        let opened = self.open_browser();
+        if opened {
+            eprintln!(
+                "Starting local auth callback server.\nIf your browser did not open, navigate to this URL to continue:\n\n{}",
+                self.auth_url
+            );
+        } else {
+            eprintln!(
+                "Starting local auth callback server.\nOpen this URL in your browser to continue:\n\n{}",
+                self.auth_url
+            );
+        }
+        opened
+    }
+
+    pub fn code_verifier(&self) -> &str {
+        &self.code_verifier
+    }
+
+    pub async fn wait_for_code(self, timeout: Duration) -> io::Result<String> {
+        let AuthorizationCodeServer {
+            server_handle,
+            shutdown_handle,
+            ..
+        } = self;
+        let server_handle = server_handle;
+        tokio::pin!(server_handle);
+
+        tokio::select! {
+            result = &mut server_handle => {
+                result
+                    .map_err(|err| io::Error::other(format!("authorization-code server thread panicked: {err:?}")))?
+            }
+            _ = tokio::time::sleep(timeout) => {
+                shutdown_handle.shutdown();
+                let _ = server_handle.await;
+                Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "OAuth login timed out waiting for the browser callback.",
+                ))
+            }
+        }
+    }
+}
+
 /// Handle used to signal the login server loop to exit.
 #[derive(Clone, Debug)]
 pub struct ShutdownHandle {
@@ -121,6 +182,92 @@ impl ShutdownHandle {
     pub fn shutdown(&self) {
         self.shutdown_notify.notify_waiters();
     }
+}
+
+pub(crate) fn start_authorization_code_server<F>(
+    port: u16,
+    callback_path: &str,
+    force_state: Option<String>,
+    auth_url_builder: F,
+) -> io::Result<AuthorizationCodeServer>
+where
+    F: FnOnce(&str, &PkceCodes, &str) -> io::Result<String>,
+{
+    let pkce = generate_pkce();
+    let state = force_state.unwrap_or_else(generate_state);
+    let callback_path = callback_path.to_string();
+
+    let server = bind_server(port)?;
+    let actual_port = match server.server_addr().to_ip() {
+        Some(addr) => addr.port(),
+        None => {
+            return Err(io::Error::new(
+                io::ErrorKind::AddrInUse,
+                "Unable to determine the server port",
+            ));
+        }
+    };
+    let server = Arc::new(server);
+
+    let redirect_uri = format!("http://localhost:{actual_port}{callback_path}");
+    let auth_url = auth_url_builder(&redirect_uri, &pkce, &state)?;
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<Request>(16);
+    let _server_handle = {
+        let server = server.clone();
+        thread::spawn(move || -> io::Result<()> {
+            while let Ok(request) = server.recv() {
+                match tx.blocking_send(request) {
+                    Ok(()) => {}
+                    Err(error) => {
+                        eprintln!("Failed to send request to channel: {error}");
+                        return Err(io::Error::other("Failed to send request to channel"));
+                    }
+                }
+            }
+            Ok(())
+        })
+    };
+
+    let shutdown_notify = Arc::new(tokio::sync::Notify::new());
+    let server_handle = {
+        let shutdown_notify = shutdown_notify.clone();
+        let server = server.clone();
+        tokio::spawn(async move {
+            let result = loop {
+                tokio::select! {
+                    _ = shutdown_notify.notified() => {
+                        break Err(io::Error::other("Authentication was not completed"));
+                    }
+                    maybe_req = rx.recv() => {
+                        let Some(req) = maybe_req else {
+                            break Err(io::Error::other("Authentication was not completed"));
+                        };
+
+                        let url_raw = req.url().to_string();
+                        let response =
+                            process_authorization_code_request(&url_raw, &callback_path, &state);
+
+                        if let Some(result) = respond_to_request(req, response).await {
+                            break result;
+                        }
+                    }
+                }
+            };
+
+            server.unblock();
+            result
+        })
+    };
+
+    Ok(AuthorizationCodeServer {
+        auth_url,
+        actual_port,
+        redirect_uri,
+        code_verifier: pkce.code_verifier,
+        server_handle,
+        shutdown_handle: ShutdownHandle { shutdown_notify },
+    })
 }
 
 /// Starts a local callback server and returns the browser auth URL.
@@ -191,30 +338,7 @@ pub fn run_login_server(opts: ServerOptions) -> io::Result<LoginServer> {
                         let response =
                             process_request(&url_raw, &opts, &redirect_uri, &pkce, actual_port, &state).await;
 
-                        let exit_result = match response {
-                            HandledRequest::Response(response) => {
-                                let _ = tokio::task::spawn_blocking(move || req.respond(response)).await;
-                                None
-                            }
-                            HandledRequest::ResponseAndExit {
-                                headers,
-                                body,
-                                result,
-                            } => {
-                                let _ = tokio::task::spawn_blocking(move || {
-                                    send_response_with_disconnect(req, headers, body)
-                                })
-                                .await;
-                                Some(result)
-                            }
-                            HandledRequest::RedirectWithHeader(header) => {
-                                let redirect = Response::empty(302).with_header(header);
-                                let _ = tokio::task::spawn_blocking(move || req.respond(redirect)).await;
-                                None
-                            }
-                        };
-
-                        if let Some(result) = exit_result {
+                        if let Some(result) = respond_to_request(req, response).await {
                             break result;
                         }
                     }
@@ -237,13 +361,14 @@ pub fn run_login_server(opts: ServerOptions) -> io::Result<LoginServer> {
 }
 
 /// Internal callback handling outcome.
-enum HandledRequest {
+enum HandledRequest<T> {
     Response(Response<Cursor<Vec<u8>>>),
     RedirectWithHeader(Header),
     ResponseAndExit {
+        status: StatusCode,
         headers: Vec<Header>,
         body: Vec<u8>,
-        result: io::Result<()>,
+        result: io::Result<T>,
     },
 }
 
@@ -254,7 +379,7 @@ async fn process_request(
     pkce: &PkceCodes,
     actual_port: u16,
     state: &str,
-) -> HandledRequest {
+) -> HandledRequest<()> {
     let parsed_url = match url::Url::parse(&format!("http://localhost{url_raw}")) {
         Ok(u) => u,
         Err(e) => {
@@ -392,6 +517,7 @@ async fn process_request(
         "/success" => {
             let body = include_str!("assets/success.html");
             HandledRequest::ResponseAndExit {
+                status: StatusCode(200),
                 headers: match Header::from_bytes(
                     &b"Content-Type"[..],
                     &b"text/html; charset=utf-8"[..],
@@ -404,6 +530,7 @@ async fn process_request(
             }
         }
         "/cancel" => HandledRequest::ResponseAndExit {
+            status: StatusCode(200),
             headers: Vec::new(),
             body: b"Login cancelled".to_vec(),
             result: Err(io::Error::new(
@@ -412,6 +539,117 @@ async fn process_request(
             )),
         },
         _ => HandledRequest::Response(Response::from_string("Not Found").with_status_code(404)),
+    }
+}
+
+fn process_authorization_code_request(
+    url_raw: &str,
+    callback_path: &str,
+    expected_state: &str,
+) -> HandledRequest<String> {
+    let parsed_url = match url::Url::parse(&format!("http://localhost{url_raw}")) {
+        Ok(u) => u,
+        Err(err) => {
+            return HandledRequest::Response(
+                Response::from_string(format!("Bad Request: {err}")).with_status_code(400),
+            );
+        }
+    };
+
+    match parsed_url.path() {
+        "/cancel" => HandledRequest::ResponseAndExit {
+            status: StatusCode(200),
+            headers: Vec::new(),
+            body: b"Login cancelled".to_vec(),
+            result: Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "Login cancelled",
+            )),
+        },
+        path if path == callback_path => {
+            let params: std::collections::HashMap<String, String> =
+                parsed_url.query_pairs().into_owned().collect();
+
+            if params.get("state").map(String::as_str) != Some(expected_state) {
+                return HandledRequest::ResponseAndExit {
+                    status: StatusCode(400),
+                    headers: html_headers(),
+                    body: b"<h1>State mismatch</h1><p>Return to your terminal and try again.</p>"
+                        .to_vec(),
+                    result: Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        "State mismatch in OAuth callback.",
+                    )),
+                };
+            }
+
+            if let Some(error_code) = params.get("error") {
+                let message = oauth_callback_error_message(
+                    error_code,
+                    params.get("error_description").map(String::as_str),
+                );
+                return HandledRequest::ResponseAndExit {
+                    status: StatusCode(403),
+                    headers: html_headers(),
+                    body: b"<h1>Sign-in failed</h1><p>Return to your terminal.</p>".to_vec(),
+                    result: Err(io::Error::new(io::ErrorKind::PermissionDenied, message)),
+                };
+            }
+
+            match params.get("code") {
+                Some(code) if !code.is_empty() => HandledRequest::ResponseAndExit {
+                    status: StatusCode(200),
+                    headers: html_headers(),
+                    body: b"<h1>Sign-in complete</h1><p>You can return to your terminal.</p>"
+                        .to_vec(),
+                    result: Ok(code.clone()),
+                },
+                _ => HandledRequest::ResponseAndExit {
+                    status: StatusCode(400),
+                    headers: html_headers(),
+                    body: b"<h1>Missing authorization code</h1><p>Return to your terminal.</p>"
+                        .to_vec(),
+                    result: Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "Missing authorization code. Sign-in could not be completed.",
+                    )),
+                },
+            }
+        }
+        _ => HandledRequest::Response(Response::from_string("Not Found").with_status_code(404)),
+    }
+}
+
+fn html_headers() -> Vec<Header> {
+    match Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..]) {
+        Ok(header) => vec![header],
+        Err(_) => Vec::new(),
+    }
+}
+
+async fn respond_to_request<T>(req: Request, response: HandledRequest<T>) -> Option<io::Result<T>> {
+    match response {
+        HandledRequest::Response(response) => {
+            let _ = tokio::task::spawn_blocking(move || req.respond(response)).await;
+            None
+        }
+        HandledRequest::RedirectWithHeader(header) => {
+            let redirect = Response::empty(302).with_header(header);
+            let _ = tokio::task::spawn_blocking(move || req.respond(redirect)).await;
+            None
+        }
+        HandledRequest::ResponseAndExit {
+            status,
+            headers,
+            body,
+            result,
+        } => {
+            let _ = tokio::task::spawn_blocking(move || {
+                send_response_with_disconnect(req, status, headers, body)
+            })
+            .await;
+            Some(result)
+        }
     }
 }
 
@@ -426,10 +664,10 @@ async fn process_request(
 /// server-side connection persistence, but it does not.
 fn send_response_with_disconnect(
     req: Request,
+    status: StatusCode,
     mut headers: Vec<Header>,
     body: Vec<u8>,
 ) -> io::Result<()> {
-    let status = StatusCode(200);
     let mut writer = req.into_writer();
     let reason = status.default_reason_phrase();
     write!(writer, "HTTP/1.1 {} {}\r\n", status.0, reason)?;
@@ -888,13 +1126,14 @@ fn login_error_response(
     kind: io::ErrorKind,
     error_code: Option<&str>,
     error_description: Option<&str>,
-) -> HandledRequest {
+) -> HandledRequest<()> {
     let mut headers = Vec::new();
     if let Ok(header) = Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..]) {
         headers.push(header);
     }
     let body = render_login_error_page(message, error_code, error_description);
     HandledRequest::ResponseAndExit {
+        status: StatusCode(200),
         headers,
         body,
         result: Err(io::Error::new(kind, message.to_string())),

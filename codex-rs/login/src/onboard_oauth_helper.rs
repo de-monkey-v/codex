@@ -1,38 +1,26 @@
 //! Browser-based helper for onboarding login and Codex auth provisioning.
 
-use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
-use std::sync::mpsc::Receiver;
-use std::sync::mpsc::channel;
-use std::thread::JoinHandle;
 use std::time::Duration;
 
-use base64::Engine;
 use codex_app_server_protocol::AuthMode;
 use codex_client::build_reqwest_client_with_custom_ca;
 use codex_utils_home_dir::find_codex_home;
-use rand::RngCore;
 use reqwest::Client;
 use reqwest::Method;
 use serde::Deserialize;
 use serde::Serialize;
-use sha2::Digest;
-use sha2::Sha256;
-use tiny_http::Header;
-use tiny_http::Response;
-use tiny_http::Server;
-use tiny_http::StatusCode;
 use url::Url;
 
 use crate::auth::AuthDotJson;
+use crate::pkce::PkceCodes;
+use crate::server::AuthorizationCodeServer;
+use crate::server::start_authorization_code_server;
 
 const AUTH_ISSUER: &str = "https://auth.openai.com";
 const PLATFORM_HYDRA_CLIENT_ID: &str = "app_2SKx67EdpoN0G6j64rFvigXD";
@@ -85,23 +73,32 @@ pub struct PendingApiProvisioning {
     options: ApiProvisionOptions,
     redirect_uri: String,
     code_verifier: String,
-    callback_server: LocalCallbackServer,
-    auth_url: String,
+    callback_server: AuthorizationCodeServer,
 }
 
 impl PendingApiProvisioning {
     pub fn auth_url(&self) -> &str {
-        &self.auth_url
+        &self.callback_server.auth_url
+    }
+
+    pub fn callback_port(&self) -> u16 {
+        self.callback_server.actual_port
     }
 
     pub fn open_browser(&self) -> bool {
-        webbrowser::open(&self.auth_url).is_ok()
+        self.callback_server.open_browser()
+    }
+
+    pub fn open_browser_or_print(&self) -> bool {
+        self.callback_server.open_browser_or_print()
     }
 
     pub async fn finish(self) -> Result<ProvisionedApiKey, HelperError> {
         let code = self
             .callback_server
-            .wait_for_code(Duration::from_secs(OAUTH_TIMEOUT_SECONDS))?;
+            .wait_for_code(Duration::from_secs(OAUTH_TIMEOUT_SECONDS))
+            .await
+            .map_err(|err| HelperError::message(err.to_string()))?;
         provision_from_authorization_code(
             &self.client,
             &self.options,
@@ -129,20 +126,24 @@ pub fn start_api_provisioning(
 ) -> Result<PendingApiProvisioning, HelperError> {
     validate_api_provision_options(&options)?;
     let client = build_http_client()?;
-    let pkce = generate_pkce();
-    let state = generate_state();
-    let callback_server =
-        LocalCallbackServer::bind(options.callback_port, DEFAULT_CALLBACK_PATH, &state)?;
+    let callback_server = start_authorization_code_server(
+        options.callback_port,
+        DEFAULT_CALLBACK_PATH,
+        /*force_state*/ None,
+        |redirect_uri, pkce, state| {
+            build_authorize_url(&options, redirect_uri, pkce, state)
+                .map_err(|err| std::io::Error::other(err.to_string()))
+        },
+    )
+    .map_err(|err| HelperError::message(err.to_string()))?;
     let redirect_uri = callback_server.redirect_uri.clone();
-    let auth_url = build_authorize_url(&options, &redirect_uri, &pkce, &state)?;
 
     Ok(PendingApiProvisioning {
         client,
         options,
         redirect_uri,
-        code_verifier: pkce.code_verifier,
+        code_verifier: callback_server.code_verifier().to_string(),
         callback_server,
-        auth_url,
     })
 }
 
@@ -155,7 +156,7 @@ pub async fn run_from_env() -> Result<(), HelperError> {
         ParseOutcome::Run(options) => {
             let auth_path = resolve_codex_auth_path(options.codex_auth_path.as_deref())?;
             let session = start_api_provisioning(options.api_provision_options())?;
-            open_browser_or_print(session.auth_url());
+            session.open_browser_or_print();
             let provisioned = session.finish().await?;
             let codex_auth_synced = !options.skip_codex_auth_sync;
             if codex_auth_synced {
@@ -378,222 +379,6 @@ fn parse_u16(raw: String, flag: &str) -> Result<u16, HelperError> {
 fn parse_u64(raw: String, flag: &str) -> Result<u64, HelperError> {
     raw.parse::<u64>()
         .map_err(|err| HelperError::message(format!("invalid value for `{flag}`: {err}")))
-}
-
-#[derive(Debug, Clone)]
-struct PkceCodes {
-    code_verifier: String,
-    code_challenge: String,
-}
-
-fn generate_pkce() -> PkceCodes {
-    let mut bytes = [0u8; 64];
-    rand::rng().fill_bytes(&mut bytes);
-    let code_verifier = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
-    let digest = Sha256::digest(code_verifier.as_bytes());
-    let code_challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest);
-    PkceCodes {
-        code_verifier,
-        code_challenge,
-    }
-}
-
-fn generate_state() -> String {
-    let mut bytes = [0u8; 32];
-    rand::rng().fill_bytes(&mut bytes);
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
-}
-
-struct LocalCallbackServer {
-    redirect_uri: String,
-    rx: Receiver<Result<String, String>>,
-    server: Arc<Server>,
-    shutdown: Arc<AtomicBool>,
-    worker: Option<JoinHandle<()>>,
-}
-
-impl LocalCallbackServer {
-    fn bind(port: u16, callback_path: &str, expected_state: &str) -> Result<Self, HelperError> {
-        let server = Arc::new(Server::http(format!("127.0.0.1:{port}")).map_err(|err| {
-            HelperError::message(format!("failed to bind callback server: {err}"))
-        })?);
-        let actual_port = server
-            .server_addr()
-            .to_ip()
-            .map(|addr| addr.port())
-            .ok_or_else(|| {
-                HelperError::message("unable to determine callback server port".to_string())
-            })?;
-        let (tx, rx) = channel();
-        let callback_path = callback_path.to_string();
-        let expected_state = expected_state.to_string();
-        let redirect_uri = format!("http://localhost:{actual_port}{callback_path}");
-        let shutdown = Arc::new(AtomicBool::new(false));
-        let server_for_thread = Arc::clone(&server);
-        let shutdown_for_thread = Arc::clone(&shutdown);
-        let callback_path_for_thread = callback_path;
-        let worker = std::thread::spawn(move || {
-            callback_loop(
-                server_for_thread,
-                shutdown_for_thread,
-                tx,
-                callback_path_for_thread,
-                expected_state,
-            );
-        });
-        Ok(Self {
-            redirect_uri,
-            rx,
-            server,
-            shutdown,
-            worker: Some(worker),
-        })
-    }
-
-    fn wait_for_code(self, timeout: Duration) -> Result<String, HelperError> {
-        match self.rx.recv_timeout(timeout) {
-            Ok(Ok(code)) => Ok(code),
-            Ok(Err(message)) => Err(HelperError::message(message)),
-            Err(_) => Err(HelperError::message(
-                "OAuth login timed out waiting for the browser callback.".to_string(),
-            )),
-        }
-    }
-}
-
-impl Drop for LocalCallbackServer {
-    fn drop(&mut self) {
-        self.shutdown.store(true, Ordering::Relaxed);
-        self.server.unblock();
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
-        }
-    }
-}
-
-fn callback_loop(
-    server: Arc<Server>,
-    shutdown: Arc<AtomicBool>,
-    tx: std::sync::mpsc::Sender<Result<String, String>>,
-    callback_path: String,
-    expected_state: String,
-) {
-    while !shutdown.load(Ordering::Relaxed) {
-        let request = match server.recv_timeout(Duration::from_millis(200)) {
-            Ok(Some(request)) => request,
-            Ok(None) => continue,
-            Err(_) => break,
-        };
-        let response = handle_callback_request(request.url(), &callback_path, &expected_state);
-        let should_exit = response.result.is_some();
-        let _ = request.respond(response.response);
-        if let Some(result) = response.result {
-            let _ = tx.send(result);
-            break;
-        }
-        if should_exit {
-            break;
-        }
-    }
-}
-
-struct CallbackResponse {
-    response: Response<std::io::Cursor<Vec<u8>>>,
-    result: Option<Result<String, String>>,
-}
-
-fn handle_callback_request(
-    url_raw: &str,
-    callback_path: &str,
-    expected_state: &str,
-) -> CallbackResponse {
-    let parsed_url = match Url::parse(&format!("http://localhost{url_raw}")) {
-        Ok(url) => url,
-        Err(err) => {
-            return CallbackResponse {
-                response: html_response(
-                    /*status*/ 400,
-                    format!("<h1>Bad Request</h1><p>{err}</p>"),
-                ),
-                result: None,
-            };
-        }
-    };
-    if parsed_url.path() != callback_path {
-        return CallbackResponse {
-            response: html_response(/*status*/ 404, "<h1>Not Found</h1>".to_string()),
-            result: None,
-        };
-    }
-
-    let params: HashMap<String, String> = parsed_url.query_pairs().into_owned().collect();
-    if params.get("state").map(String::as_str) != Some(expected_state) {
-        return CallbackResponse {
-            response: html_response(/*status*/ 400, "<h1>State mismatch</h1>".to_string()),
-            result: Some(Err("State mismatch in OAuth callback.".to_string())),
-        };
-    }
-    if let Some(error_code) = params.get("error") {
-        let message = oauth_callback_error_message(
-            error_code,
-            params.get("error_description").map(String::as_str),
-        );
-        return CallbackResponse {
-            response: html_response(
-                /*status*/ 403,
-                "<h1>Sign-in failed</h1><p>Return to your terminal.</p>".to_string(),
-            ),
-            result: Some(Err(message)),
-        };
-    }
-    match params.get("code") {
-        Some(code) if !code.is_empty() => CallbackResponse {
-            response: html_response(
-                /*status*/ 200,
-                "<h1>Sign-in complete</h1><p>You can return to your terminal.</p>".to_string(),
-            ),
-            result: Some(Ok(code.clone())),
-        },
-        _ => CallbackResponse {
-            response: html_response(
-                /*status*/ 400,
-                "<h1>Missing authorization code</h1>".to_string(),
-            ),
-            result: Some(Err(
-                "Missing authorization code. Sign-in could not be completed.".to_string(),
-            )),
-        },
-    }
-}
-
-fn html_response(status: u16, body: String) -> Response<std::io::Cursor<Vec<u8>>> {
-    let mut response = Response::from_string(body).with_status_code(StatusCode(status));
-    if let Ok(header) = Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..]) {
-        response = response.with_header(header);
-    }
-    response
-}
-
-fn oauth_callback_error_message(error_code: &str, error_description: Option<&str>) -> String {
-    match error_description {
-        Some(description) if !description.is_empty() => {
-            format!("OAuth callback error ({error_code}): {description}")
-        }
-        _ => format!("OAuth callback error ({error_code})."),
-    }
-}
-
-fn open_browser_or_print(auth_url: &str) {
-    let opened = webbrowser::open(auth_url).is_ok();
-    if opened {
-        eprintln!(
-            "Starting local login server.\nIf your browser did not open, navigate to this URL to authenticate:\n\n{auth_url}"
-        );
-    } else {
-        eprintln!(
-            "Starting local login server.\nOpen this URL in your browser to authenticate:\n\n{auth_url}"
-        );
-    }
 }
 
 fn build_authorize_url(
