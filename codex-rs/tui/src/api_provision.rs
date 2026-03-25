@@ -96,7 +96,11 @@ fn continue_in_browser_message(
     ];
 
     if browser_opened {
-        lines.push("  Codex tried to open this link for you.".dark_gray().into());
+        lines.push(
+            "  Codex tried to open this link for you."
+                .dark_gray()
+                .into(),
+        );
     } else {
         lines.push(
             "  Codex couldn't auto-open your browser, but the provisioning flow is still waiting."
@@ -304,9 +308,7 @@ mod tests {
             /*browser_opened*/ false,
         );
 
-        assert!(
-            render_cell(&cell).contains("https://auth.example.com/oauth/authorize?state=abc")
-        );
+        assert!(render_cell(&cell).contains("https://auth.example.com/oauth/authorize?state=abc"));
     }
 
     fn render_cell(cell: &PlainHistoryCell) -> String {
